@@ -1,0 +1,89 @@
+{
+  "theme": "light_and_dark",
+  "typography": {
+    "headings": "Cabinet Grotesk",
+    "body": "IBM Plex Sans",
+    "notes": "Ensure heading tracking is tight (`tracking-tighter`). Body text should be highly legible and utilitarian. DO NOT USE Inter, Roboto, or Lato for headings."
+  },
+  "colors": {
+    "archetype": "Swiss & High-Contrast",
+    "base": {
+      "light": "#FAFAFA",
+      "dark": "#0A0A0A"
+    },
+    "text": {
+      "light": "#111111",
+      "dark": "#FFFFFF"
+    },
+    "primary": "#000000",
+    "primary_dark": "#FFFFFF",
+    "tags": {
+      "VALID": "#02C039",
+      "EXPIRED": "#FF3B30",
+      "NEEDS_REVIEW": "#FF9500",
+      "INSUFFICIENT": "#FF9500"
+    },
+    "notes": "High contrast minimal UI. Monochrome base allows the colored status tags to pop and draw immediate attention. Avoid excessive gradients."
+  },
+  "layouts": {
+    "marketing_pages": "Use radical asymmetry and generous spacing (p-12 to p-24). Start with strong typography. Bento grids for features. Hero image with a maximum overlay of bg-black/40.",
+    "dashboard_pages": "High density grid. Strict F-pattern hierarchy. Minimal borders (1px solid border) with subtle or no shadows for data tables. Use full height and responsive grids for the CRM view."
+  },
+  "grids": {
+    "marketing_bento": "grid-cols-1 md:grid-cols-12 gap-8. Span logic for 3 features: one featured (col-span-12 or md:col-span-8) and others col-span-4 or col-span-6. Avoid perfectly equal squares.",
+    "dashboard_table": "Full-width layouts with dense row spacing for high data visibility. Actionable-first layout."
+  },
+  "components": {
+    "navigation": "Sticky nav with Crystal Glassmorphism (backdrop-blur-xl bg-white/70 or bg-black/60). Solid bottom border 1px.",
+    "cards": "Flat background, 1px solid border (border-border), no shadow by default. On hover: slight lift (-translate-y-1) and shadow-sm.",
+    "buttons": "Sharp edges (rounded-none or rounded-sm). High contrast background (black in light mode, white in dark mode). Hover: invert colors or change opacity.",
+    "data_table": "Use Shadcn Table. Dense rows. Action buttons (Edit/View) next to the data. Status tags must use pill shapes (rounded-full) with custom background/text colors for VALID, EXPIRED, NEEDS_REVIEW."
+  },
+  "visual_enhancers": {
+    "motion": "Lenis smooth scrolling for marketing pages. Hover states for all table rows and buttons. Micro-animations for data loading.",
+    "borders": "Expose the skeleton on the feature grid using 'Grid Borders' pattern."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.pexels.com/photos/31197870/pexels-photo-31197870.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "category": "Hero Section",
+        "description": "Modern steel framework structure, representing automated construction compliance."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1503387762-592deb58ef4e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwxfHxhcmNoaXRlY3QlMjBleGFtaW5pbmclMjBibHVlcHJpbnRzfGVufDB8fHx8MTc4NTgxMDgxN3ww&ixlib=rb-4.1.0&q=85",
+        "category": "Invite Subcontractor/Upload Page",
+        "description": "Architect/contractor working on a draft, used as background or side visual for the upload page."
+      }
+    ]
+  },
+  "icons": "lucide-react for sharp, consistent, technical icon representations.",
+  "3d_libraries": "Not recommended for this specific compliance B2B dashboard. Focus on fast load times, information density, and clean UI.",
+  "accessibility": {
+    "contrast": "Ensure minimum 4.5:1 text contrast. All form inputs and buttons must have focus states (`focus:ring-2 focus:ring-offset-2`).",
+    "tags": "Ensure tag text is readable against the bright status background colors. White text on Green/Red/Orange tags is recommended, or very dark text if APCA requires it."
+  },
+  "instructions_to_main_agent": [
+    "Build the public marketing page with a bold hero section ('Stop Chasing Subcontractors. Automate Your COI Compliance.') and a bento-style 3-column feature grid (AI COI Extraction, Background SMS/Email Drip Reminders, Live Trade Dashboard with color-coded status tags).",
+    "Implement the Pricing block for Pro Plan at $149/mo with Stripe checkout placeholder/button.",
+    "Implement the Authenticated Contractor Compliance Dashboard: Use Shadcn Table for the compliance documents. Apply specific color-codes for tags: VALID (green #02C039), EXPIRED (red #FF3B30), NEEDS_REVIEW/INSUFFICIENT (orange #FF9500).",
+    "Add a search bar and status filter above the compliance table.",
+    "Create the Invite Subcontractor form page.",
+    "Create a mobile-optimized Subcontractor public document upload page with confirmation view.",
+    "Create a CRM view for prospects/outreach.",
+    "Apply 'data-testid' attributes to all interactive elements."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Avoid generic, 'on distribution' outputs. Make creative, distinctive frontends that surprise and delight.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur) for sticky headers.",
+    "NEVER use generic transition like 'transition: all'. Explicitly specify transitions.",
+    "Do not center align the app container (.App { text-align: center; }).",
+    "Always use modern button styles (sharp edges for Swiss Brutalism) with interaction animations.",
+    "NEVER use emoji characters for icons. Use lucide-react.",
+    "Use generous spacing. If typical is p-4, use p-8 or p-12.",
+    "Implement hover states, transitions, and entrance animations for elements.",
+    "Do NOT use transparent backgrounds for dropdowns or modals.",
+    "Prioritize using Shadcn UI components from src/components/ui.",
+    "Use 'sonner' for toast notifications."
+  ]
+}
