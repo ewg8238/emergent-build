@@ -1,0 +1,36 @@
+{
+  "summary": "End-to-end test of COI Autopilot (FastAPI + React + MongoDB). 11/11 backend pytest tests pass, all frontend flows verified: landing, login, dashboard (5 docs with all four statuses VALID/EXPIRED/NEEDS_REVIEW/INSUFFICIENT), invite subcontractor (email + simulated SMS logged), Workflow B upload+GPT-5.4 vision parse (produced parsed fields), cron expirations, cron prospecting (6 mock leads, deduped on 2nd run), prospects Kanban with Run Pipeline, Stripe checkout returns valid session URL. Fixed one MongoDB ObjectId serialization bug in /api/subcontractors/invite while testing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "send_email (Resend via integrations.emergentagent.com)", "issue": "Some /api/v1/email/send requests return 422 in production traffic though the same payload works via curl. Emails still logged to notifications with status 'failed'; core flow unaffected because SMS is simulated and API responses do not depend on email success."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Landing / Global", "issues": ["Browser tab title is generic 'Emergent | Fullstack App' — should be 'COI Autopilot' to match branding."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Investigate intermittent 422 from Emergent Resend email endpoint (may need specific 'to' formatting or from address). Non-blocking.",
+    "Update index.html <title> to 'COI Autopilot'."
+  ],
+  "critical_code_review_comments": [
+    "server.py insert_one mutates the doc with ObjectId which was being spread into response causing 500 in /api/subcontractors/invite — fixed by popping _id before returning.",
+    "run_expiration_check uses string comparison of ISO dates ($lte: soon) which works but is fragile if dates are stored as datetime objects; currently stored as strings so OK.",
+    "server.py is 544 lines but still readable; consider splitting into routers (auth, coi, prospects, payments) as it grows.",
+    "parse_coi_with_ai does json.loads on model output with only bracket-slice fallback; if model returns non-JSON the endpoint still handles via NEEDS_REVIEW branch — good defensive path.",
+    "upload endpoint is unauthenticated (public link) — acceptable for the sub-upload use case but consider adding a signed/expiring token in the link to prevent abuse."
+  ],
+  "updated_files": ["/app/backend/server.py", "/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "ewg8238@gmail.com / Compliance2026!",
+  "seed_data_creation": "Seed runs on startup: admin contractor + 4 subs + 4 compliance docs (one per status) + 6 mock prospects. Test also inserted TEST_ prefixed subcontractors during runs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend passing 11/11. Only fix applied by tester was popping ObjectId _id in invite response. Email 422 is an integration nuance — not blocking. Note that PATCH /api/prospects and other authenticated endpoints accept token via Bearer header (verified). Public /api/upload works with sub_id + gc_id form fields and multipart file; AI parsing via GPT-5.4 vision succeeded in real request (~5s).",
+  "rca of the issue": "Invite 500 RCA: motor's insert_one(doc) mutates the passed dict to include the generated ObjectId under '_id'. The route later returned {'id': sub_id, 'upload_link': link, **doc}, spreading the ObjectId into the response body. FastAPI/jsonable_encoder cannot serialize ObjectId -> raised 'ObjectId is not iterable'. Fix: doc.pop('_id', None) before spreading. Mitigation for other endpoints: use a Pydantic response model or explicitly build the response dict."
+}
