@@ -5,7 +5,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Search, RefreshCw, Bell, CheckCircle2, AlertTriangle, XCircle, FileWarning, Eye, Download } from "lucide-react";
+import { Plus, Search, RefreshCw, Bell, CheckCircle2, AlertTriangle, XCircle, FileWarning, Eye, Download, Mail } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -53,6 +53,14 @@ export default function Dashboard() {
       URL.revokeObjectURL(url);
       toast.success(`${fmt.toUpperCase()} downloaded`, { id: t });
     } catch { toast.error("Export failed", { id: t }); }
+  };
+
+  const emailReport = async () => {
+    const t = toast.loading("Emailing your compliance report…");
+    try {
+      const { data } = await api.post("/reports/email-me");
+      toast.success(`Weekly report emailed to ${data.to}`, { id: t });
+    } catch { toast.error("Failed to email report", { id: t }); }
   };
 
   const filtered = docs.filter((d) => {
@@ -114,6 +122,7 @@ export default function Dashboard() {
           <button className="btn-outline !py-2.5 !px-4" onClick={load} data-testid="refresh-btn"><RefreshCw className="w-4 h-4" /></button>
           <button className="btn-outline !py-2.5 !px-4 text-sm flex items-center gap-2" onClick={() => exportReport("csv")} data-testid="export-csv-btn"><Download className="w-4 h-4" /> CSV</button>
           <button className="btn-outline !py-2.5 !px-4 text-sm flex items-center gap-2" onClick={() => exportReport("pdf")} data-testid="export-pdf-btn"><Download className="w-4 h-4" /> PDF</button>
+          <button className="btn-outline !py-2.5 !px-4 text-sm flex items-center gap-2" onClick={emailReport} data-testid="email-report-btn"><Mail className="w-4 h-4" /> Email</button>
         </div>
 
         <div className="border border-neutral-200 bg-white overflow-x-auto">

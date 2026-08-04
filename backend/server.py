@@ -332,7 +332,7 @@ async def upload_coi(sub_id: str = Form(...), gc_id: str = Form(...), token: str
     await db.compliance_documents.update_one({"subcontractor_id": sub_id}, {"$set": doc}, upsert=True)
     sub_update = {"upload_token_used": True}
     if status == "VALID":
-        sub_update.update({"last_nudged_at": None, "nudge_count": 0})
+        sub_update.update({"last_nudged_at": None, "nudge_count": 0, "escalated": False})
     await db.subcontractors.update_one({"_id": ObjectId(sub_id)}, {"$set": sub_update})
 
     sub = await db.subcontractors.find_one({"_id": ObjectId(sub_id)}) if ObjectId.is_valid(sub_id) else None
@@ -366,38 +366,48 @@ async def compliance_docs(user: dict = Depends(get_current_user)):
     return await enrich_docs(docs)
 
 
-@api.get("/compliance-documents/export")
-async def export_compliance(format: str = "csv", user: dict = Depends(get_current_user)):
-    docs = await db.compliance_documents.find({"contractor_id": user["id"]}).sort("created_at", -1).to_list(1000)
+async def compliance_report_rows(contractor_id):
+    docs = await db.compliance_documents.find({"contractor_id": contractor_id}).sort("created_at", -1).to_list(1000)
     rows = await enrich_docs(docs)
     head = ["Subcontractor", "Contact", "Email", "Policy #", "GL Limit", "Expiration", "Status", "Notes"]
     data = [[r["subcontractor_name"], r.get("contact_name", ""), r.get("contact_email", ""),
              r.get("gl_policy_number") or "",
              f"${int(r['general_liability_limit']):,}" if r.get("general_liability_limit") else "",
              r.get("gl_expiration_date") or "", r["status"], r.get("review_reason") or ""] for r in rows]
+    return head, data, rows
+
+
+def build_compliance_pdf(company_name, head, data, rows) -> bytes:
+    buf = io.BytesIO()
+    pdf = SimpleDocTemplate(buf, pagesize=landscape(letter), title="COI Compliance Report")
+    styles = getSampleStyleSheet()
+    elems = [Paragraph(f"COI Compliance Report — {company_name}", styles["Title"]),
+             Paragraph(datetime.now(timezone.utc).strftime("Generated %Y-%m-%d %H:%M UTC"), styles["Normal"]),
+             Spacer(1, 12)]
+    cmap = {"VALID": colors.HexColor("#02C039"), "EXPIRED": colors.HexColor("#FF3B30"),
+            "NEEDS_REVIEW": colors.HexColor("#FF9500"), "INSUFFICIENT": colors.HexColor("#FF9500")}
+    table = Table([head] + (data or [["No documents yet", "", "", "", "", "", "", ""]]), repeatRows=1)
+    style = [("BACKGROUND", (0, 0), (-1, 0), colors.black), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+             ("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F7F7")])]
+    for i, r in enumerate(rows, start=1):
+        c = cmap.get(r["status"])
+        if c:
+            style.append(("TEXTCOLOR", (6, i), (6, i), c))
+    table.setStyle(TableStyle(style))
+    elems.append(table)
+    pdf.build(elems)
+    return buf.getvalue()
+
+
+@api.get("/compliance-documents/export")
+async def export_compliance(format: str = "csv", user: dict = Depends(get_current_user)):
+    head, data, rows = await compliance_report_rows(user["id"])
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
     if format == "pdf":
-        buf = io.BytesIO()
-        pdf = SimpleDocTemplate(buf, pagesize=landscape(letter), title="COI Compliance Report")
-        styles = getSampleStyleSheet()
-        elems = [Paragraph(f"COI Compliance Report — {user['company_name']}", styles["Title"]),
-                 Paragraph(datetime.now(timezone.utc).strftime("Generated %Y-%m-%d %H:%M UTC"), styles["Normal"]),
-                 Spacer(1, 12)]
-        cmap = {"VALID": colors.HexColor("#02C039"), "EXPIRED": colors.HexColor("#FF3B30"),
-                "NEEDS_REVIEW": colors.HexColor("#FF9500"), "INSUFFICIENT": colors.HexColor("#FF9500")}
-        table = Table([head] + data, repeatRows=1)
-        style = [("BACKGROUND", (0, 0), (-1, 0), colors.black), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                 ("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
-                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F7F7")])]
-        for i, r in enumerate(rows, start=1):
-            c = cmap.get(r["status"])
-            if c:
-                style.append(("TEXTCOLOR", (6, i), (6, i), c))
-        table.setStyle(TableStyle(style))
-        elems.append(table)
-        pdf.build(elems)
-        return FileResponse(content=buf.getvalue(), media_type="application/pdf",
+        return FileResponse(content=build_compliance_pdf(user["company_name"], head, data, rows),
+                            media_type="application/pdf",
                             headers={"Content-Disposition": f"attachment; filename=coi_report_{stamp}.pdf"})
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -405,6 +415,57 @@ async def export_compliance(format: str = "csv", user: dict = Depends(get_curren
     w.writerows(data)
     return FileResponse(content=buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f"attachment; filename=coi_report_{stamp}.csv"})
+
+
+async def send_report_email(email, company_name, contractor_id):
+    head, data, rows = await compliance_report_rows(contractor_id)
+    counts = {"VALID": 0, "EXPIRED": 0, "NEEDS_REVIEW": 0, "INSUFFICIENT": 0}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    pdf_bytes = build_compliance_pdf(company_name, head, data, rows)
+    rdir = ROOT_DIR / "uploads" / "reports"
+    rdir.mkdir(parents=True, exist_ok=True)
+    fname = f"{contractor_id}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    (rdir / fname).write_bytes(pdf_bytes)
+    pdf_url = f"{FRONTEND_URL}/api/uploads/reports/{fname}"
+    cc = {"VALID": "#02C039", "EXPIRED": "#FF3B30", "NEEDS_REVIEW": "#FF9500", "INSUFFICIENT": "#FF9500"}
+    body_rows = "".join(
+        f"<tr><td style='padding:8px;border-bottom:1px solid #eee'>{r['subcontractor_name']}</td>"
+        f"<td style='padding:8px;border-bottom:1px solid #eee'>{r.get('gl_expiration_date') or '—'}</td>"
+        f"<td style='padding:8px;border-bottom:1px solid #eee;color:{cc.get(r['status'],'#111')};font-weight:600'>{r['status']}</td></tr>"
+        for r in rows) or "<tr><td colspan='3' style='padding:8px'>No subcontractors yet.</td></tr>"
+    html = (f"<div style='font-family:Arial;max-width:640px'>"
+            f"<h2 style='margin-bottom:4px'>Weekly COI Compliance Summary</h2>"
+            f"<p style='color:#666;margin-top:0'>{company_name} — {datetime.now(timezone.utc).strftime('%B %d, %Y')}</p>"
+            f"<p><b style='color:#02C039'>{counts['VALID']} Valid</b> &nbsp;·&nbsp; "
+            f"<b style='color:#FF3B30'>{counts['EXPIRED']} Expired</b> &nbsp;·&nbsp; "
+            f"<b style='color:#FF9500'>{counts['NEEDS_REVIEW']} Needs review</b> &nbsp;·&nbsp; "
+            f"<b style='color:#FF9500'>{counts['INSUFFICIENT']} Insufficient</b></p>"
+            f"<table style='border-collapse:collapse;width:100%;font-size:14px'>"
+            f"<tr><th align='left' style='padding:8px;border-bottom:2px solid #000'>Subcontractor</th>"
+            f"<th align='left' style='padding:8px;border-bottom:2px solid #000'>Expiration</th>"
+            f"<th align='left' style='padding:8px;border-bottom:2px solid #000'>Status</th></tr>{body_rows}</table>"
+            f"<p style='margin-top:20px'><a href='{pdf_url}' style='background:#000;color:#fff;padding:10px 20px;text-decoration:none'>Download full PDF report</a></p></div>")
+    await send_email(email, f"Weekly COI Compliance Summary — {company_name}", html)
+
+
+async def run_weekly_reports():
+    sent = 0
+    for gc in await db.contractors.find({}).to_list(1000):
+        await send_report_email(gc["email"], gc.get("company_name", "Your Company"), str(gc["_id"]))
+        sent += 1
+    return {"reports_sent": sent}
+
+
+@api.post("/cron/weekly-reports")
+async def cron_weekly_reports(user: dict = Depends(get_current_user)):
+    return await run_weekly_reports()
+
+
+@api.post("/reports/email-me")
+async def email_me_report(user: dict = Depends(get_current_user)):
+    await send_report_email(user["email"], user["company_name"], user["id"])
+    return {"sent": True, "to": user["email"]}
 
 
 @api.get("/dashboard/stats")
@@ -421,7 +482,7 @@ async def run_expiration_check():
     soon = (date.today() + timedelta(days=30)).isoformat()
     today = date.today().isoformat()
     docs = await db.compliance_documents.find({"gl_expiration_date": {"$lte": soon, "$ne": None}}).to_list(2000)
-    nudged = 0
+    nudged, escalated = 0, 0
     for d in docs:
         exp = str(d.get("gl_expiration_date"))[:10]
         new_status = "EXPIRED" if exp < today else "NEEDS_REVIEW"
@@ -443,7 +504,17 @@ async def run_expiration_check():
                              f"<p>Hi {sub['contact_name']}, your COI expires on {exp}. <a href='{link}'>Upload updated paperwork here</a>.</p>")
             await send_sms(sub.get("phone", ""), f"Reminder #{n}: your COI expires {exp}. Upload updated paperwork: {link}")
             nudged += 1
-    return {"scanned": len(docs), "nudged": nudged}
+            if n >= 3 and not sub.get("escalated"):
+                gc = await db.contractors.find_one({"_id": ObjectId(sub["contractor_id"])}) if ObjectId.is_valid(sub.get("contractor_id", "")) else None
+                if gc:
+                    await send_email(gc["email"], f"Action needed: {sub['company_name']} is ignoring COI reminders",
+                                     f"<div style='font-family:Arial'><h2>Compliance escalation</h2>"
+                                     f"<p><b>{sub['company_name']}</b> ({sub['contact_name']}, {sub['email']}, {sub.get('phone','')}) "
+                                     f"has received {n} COI renewal reminders without uploading updated paperwork. "
+                                     f"Their policy expires {exp}. Please follow up directly.</p></div>")
+                await db.subcontractors.update_one({"_id": sub["_id"]}, {"$set": {"escalated": True}})
+                escalated += 1
+    return {"scanned": len(docs), "nudged": nudged, "escalated": escalated}
 
 
 @api.post("/cron/check-expirations")
@@ -690,6 +761,7 @@ async def startup():
     await seed()
     scheduler.add_job(run_expiration_check, "cron", hour=0, minute=0, id="daily_exp", replace_existing=True)
     scheduler.add_job(run_prospecting, "cron", day_of_week="mon", hour=8, minute=0, id="weekly_prospect", replace_existing=True)
+    scheduler.add_job(run_weekly_reports, "cron", day_of_week="mon", hour=7, minute=0, id="weekly_reports", replace_existing=True)
     scheduler.start()
 
 
