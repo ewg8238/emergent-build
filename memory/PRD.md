@@ -51,3 +51,9 @@ End-to-end automated B2B micro-SaaS for General Contractors (GCs) to track, pars
 - **Escalation alerts**: GC emailed when a sub ignores >= threshold reminders (per-GC configurable), `escalated` flag prevents repeats, resets on VALID upload.
 - **Company settings** (`GET/PUT /api/settings`, `POST /api/settings/logo`): logo upload (served `/api/uploads/logos/*`), brand color, escalation threshold (2/3/5), extra weekly-report recipients. New `/settings` page + nav link.
 - **Branded PDF/email**: `build_compliance_pdf` renders GC logo + brand color on title and header row; report email uses brand color + logo. Verified visually.
+
+
+## Implemented (2026-08-04) — Iteration 5
+- **Per-GC report schedule**: `report_day` (0-6) + `report_hour` (0-23) on contractor; hourly `run_scheduled_reports` cron sends when day/hour match (dedupe via `last_report_sent`). Settings page has day + hour selects.
+- **Dashboard theming**: dashboard fetches `/settings`; brand color applied to top accent bar, company label, Total stat, and Invite button. Compliance status pills intentionally kept green/red/orange.
+- **Branded upload page**: public `GET /api/public/contractor/{gc_id}` returns company_name/logo_url/brand_color; `/upload` shows GC logo + name + brand-colored submit button.

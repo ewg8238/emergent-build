@@ -129,6 +129,8 @@ class SettingsReq(BaseModel):
     brand_color: Optional[str] = None
     escalation_threshold: Optional[int] = None
     report_recipients: Optional[List[str]] = None
+    report_day: Optional[int] = None
+    report_hour: Optional[int] = None
 
 
 # ---------- Notifications (email via Resend, SMS simulated) ----------
@@ -488,6 +490,18 @@ async def run_weekly_reports():
     return {"reports_sent": sent}
 
 
+async def run_scheduled_reports():
+    now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    sent = 0
+    for gc in await db.contractors.find({}).to_list(1000):
+        if now.weekday() == gc.get("report_day", 0) and now.hour == gc.get("report_hour", 7) and gc.get("last_report_sent") != today:
+            await send_report_email(gc)
+            await db.contractors.update_one({"_id": gc["_id"]}, {"$set": {"last_report_sent": today}})
+            sent += 1
+    return {"reports_sent": sent}
+
+
 @api.post("/cron/weekly-reports")
 async def cron_weekly_reports(user: dict = Depends(get_current_user)):
     return await run_weekly_reports()
@@ -504,7 +518,8 @@ async def email_me_report(user: dict = Depends(get_current_user)):
 async def get_settings(user: dict = Depends(get_current_user)):
     return {"company_name": user["company_name"], "brand_color": user.get("brand_color", "#111111"),
             "logo_url": user.get("logo_url"), "escalation_threshold": user.get("escalation_threshold", 3),
-            "report_recipients": user.get("report_recipients", [])}
+            "report_recipients": user.get("report_recipients", []),
+            "report_day": user.get("report_day", 0), "report_hour": user.get("report_hour", 7)}
 
 
 @api.put("/settings")
@@ -516,9 +531,22 @@ async def update_settings(body: SettingsReq, user: dict = Depends(get_current_us
         upd["escalation_threshold"] = int(body.escalation_threshold)
     if body.report_recipients is not None:
         upd["report_recipients"] = [e.strip() for e in body.report_recipients if e and e.strip()]
+    if body.report_day is not None:
+        upd["report_day"] = max(0, min(6, int(body.report_day)))
+    if body.report_hour is not None:
+        upd["report_hour"] = max(0, min(23, int(body.report_hour)))
     if upd:
         await db.contractors.update_one({"_id": ObjectId(user["id"])}, {"$set": upd})
     return {"ok": True, **upd}
+
+
+@api.get("/public/contractor/{gc_id}")
+async def public_contractor(gc_id: str):
+    gc = await db.contractors.find_one({"_id": ObjectId(gc_id)}) if ObjectId.is_valid(gc_id) else None
+    if not gc:
+        raise HTTPException(404, "Not found")
+    return {"company_name": gc.get("company_name"), "logo_url": gc.get("logo_url"),
+            "brand_color": gc.get("brand_color", "#111111")}
 
 
 @api.post("/settings/logo")
@@ -827,7 +855,7 @@ async def startup():
     await seed()
     scheduler.add_job(run_expiration_check, "cron", hour=0, minute=0, id="daily_exp", replace_existing=True)
     scheduler.add_job(run_prospecting, "cron", day_of_week="mon", hour=8, minute=0, id="weekly_prospect", replace_existing=True)
-    scheduler.add_job(run_weekly_reports, "cron", day_of_week="mon", hour=7, minute=0, id="weekly_reports", replace_existing=True)
+    scheduler.add_job(run_scheduled_reports, "cron", minute=0, id="hourly_reports", replace_existing=True)
     scheduler.start()
 
 

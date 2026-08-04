@@ -20,12 +20,14 @@ export default function Dashboard() {
   const [status, setStatus] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [viewDoc, setViewDoc] = useState(null);
+  const [brand, setBrand] = useState("#111111");
 
   const load = async () => {
     setLoading(true);
     try {
-      const [d, s] = await Promise.all([api.get("/compliance-documents"), api.get("/dashboard/stats")]);
+      const [d, s, cfg] = await Promise.all([api.get("/compliance-documents"), api.get("/dashboard/stats"), api.get("/settings")]);
       setDocs(d.data); setStats(s.data);
+      if (cfg.data.brand_color) setBrand(cfg.data.brand_color);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -70,7 +72,7 @@ export default function Dashboard() {
   });
 
   const cards = [
-    { label: "Total", value: stats.total, icon: FileWarning, color: "#111" },
+    { label: "Total", value: stats.total, icon: FileWarning, color: brand },
     { label: "Valid", value: stats.VALID, icon: CheckCircle2, color: "var(--valid)" },
     { label: "Expired", value: stats.EXPIRED, icon: XCircle, color: "var(--expired)" },
     { label: "Review / Insufficient", value: (stats.NEEDS_REVIEW || 0) + (stats.INSUFFICIENT || 0), icon: AlertTriangle, color: "var(--review)" },
@@ -79,17 +81,18 @@ export default function Dashboard() {
   return (
     <div>
       <Nav />
+      <div style={{ height: 4, background: brand }} data-testid="brand-accent-bar" />
       <div className="max-w-7xl mx-auto px-6 py-10">
         <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
           <div>
-            <p className="mono text-sm text-neutral-500">{user?.company_name}</p>
+            <p className="mono text-sm font-medium" style={{ color: brand }}>{user?.company_name}</p>
             <h1 className="font-head text-4xl">Compliance Dashboard</h1>
           </div>
           <div className="flex gap-3">
             <button className="btn-outline !py-2.5 !px-4 flex items-center gap-2 text-sm" onClick={runReminders} data-testid="run-reminders-btn">
               <Bell className="w-4 h-4" /> Run Reminder Drip
             </button>
-            <Link to="/invite-subcontractor" className="btn-primary !py-2.5 !px-4 flex items-center gap-2 text-sm" data-testid="invite-sub-btn">
+            <Link to="/invite-subcontractor" className="btn-primary !py-2.5 !px-4 flex items-center gap-2 text-sm" style={{ background: brand, borderColor: brand }} data-testid="invite-sub-btn">
               <Plus className="w-4 h-4" /> Invite Subcontractor
             </Link>
           </div>

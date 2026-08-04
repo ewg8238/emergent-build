@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
 import { UploadCloud, CheckCircle2, HardHat, FileText } from "lucide-react";
 
 const BG = "https://images.unsplash.com/photo-1503387762-592deb58ef4e?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 export default function Upload() {
   const [params] = useSearchParams();
@@ -14,6 +15,14 @@ export default function Upload() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [brand, setBrand] = useState(null);
+
+  useEffect(() => {
+    if (!gc_id) return;
+    api.get(`/public/contractor/${gc_id}`).then(({ data }) => setBrand(data)).catch(() => {});
+  }, [gc_id]);
+
+  const accent = brand?.brand_color || "#111111";
 
   const submit = async (e) => {
     e.preventDefault();
@@ -40,10 +49,15 @@ export default function Upload() {
         <img src={BG} alt="blueprint" className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute inset-0 bg-black/50" />
         <div className="relative p-12 text-white h-full flex flex-col justify-between">
-          <div className="flex items-center gap-2"><HardHat className="w-6 h-6" /><span className="font-head text-xl">COI Autopilot</span></div>
+          <div className="flex items-center gap-3">
+            {brand?.logo_url
+              ? <img src={`${BACKEND_URL}${brand.logo_url}`} alt="logo" className="max-h-12 bg-white/95 p-1.5 rounded" data-testid="upload-gc-logo" />
+              : <HardHat className="w-6 h-6" />}
+            <span className="font-head text-xl">{brand?.company_name || "COI Autopilot"}</span>
+          </div>
           <div>
             <h2 className="font-head text-4xl leading-tight">Upload your Certificate of Insurance</h2>
-            <p className="text-white/70 mt-3">Our AI reads it instantly — no forms to fill out.</p>
+            <p className="text-white/70 mt-3">{brand?.company_name ? `${brand.company_name} uses COI Autopilot — ` : ""}Our AI reads it instantly, no forms to fill out.</p>
           </div>
         </div>
       </div>
@@ -70,15 +84,18 @@ export default function Upload() {
             </div>
           ) : (
             <form onSubmit={submit}>
+              {brand?.logo_url && (
+                <img src={`${BACKEND_URL}${brand.logo_url}`} alt="logo" className="max-h-12 mb-4 md:hidden" data-testid="upload-gc-logo-mobile" />
+              )}
               <h1 className="font-head text-3xl mb-2">Upload your COI</h1>
-              <p className="text-neutral-600 mb-6 text-sm">Accepted: PDF, JPG or PNG. A clear photo of your ACORD certificate works great.</p>
+              <p className="text-neutral-600 mb-6 text-sm">{brand?.company_name ? `For ${brand.company_name}. ` : ""}Accepted: PDF, JPG or PNG. A clear photo of your ACORD certificate works great.</p>
               <label className="border-2 border-dashed border-neutral-300 rounded-sm p-10 flex flex-col items-center justify-center cursor-pointer hover:border-black transition-colors" data-testid="upload-dropzone">
                 <UploadCloud className="w-10 h-10 text-neutral-400 mb-3" />
                 <span className="text-sm text-neutral-600">{file ? file.name : "Tap to choose a file"}</span>
                 <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => setFile(e.target.files[0])} data-testid="upload-file-input" />
               </label>
               {error && <p className="text-sm text-[var(--expired)] mt-3" data-testid="upload-error">{error}</p>}
-              <button className="btn-primary w-full mt-6" disabled={!file || loading} data-testid="upload-submit">
+              <button className="btn-primary w-full mt-6" style={{ background: accent, borderColor: accent }} disabled={!file || loading} data-testid="upload-submit">
                 {loading ? "Analyzing with AI…" : "Submit COI"}
               </button>
             </form>

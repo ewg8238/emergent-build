@@ -3,10 +3,11 @@ import Nav from "@/components/Nav";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
-import { Palette, Upload, Users, ShieldAlert, Save } from "lucide-react";
+import { Palette, Upload, Users, ShieldAlert, Save, CalendarClock } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 export default function Settings() {
   const { refresh } = useAuth();
@@ -30,6 +31,8 @@ export default function Settings() {
         brand_color: settings.brand_color,
         escalation_threshold: settings.escalation_threshold,
         report_recipients: list,
+        report_day: settings.report_day,
+        report_hour: settings.report_hour,
       });
       toast.success("Settings saved");
       load();
@@ -110,6 +113,26 @@ export default function Settings() {
             <p className="text-sm text-neutral-600 mb-3">Extra teammates who also get the Monday compliance email (comma-separated). You always receive it.</p>
             <input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="ops@yourco.com, pm@yourco.com"
               className="w-full border border-neutral-300 px-4 py-3 rounded-sm focus:ring-2 focus:ring-black outline-none" data-testid="recipients-input" />
+          </div>
+
+          {/* Schedule */}
+          <div className="border border-neutral-200 bg-white p-6">
+            <div className="flex items-center gap-2 mb-4"><CalendarClock className="w-5 h-5" /><h2 className="font-head text-xl">Report Schedule</h2></div>
+            <p className="text-sm text-neutral-600 mb-3">Pick the day and time (UTC) your weekly compliance email is sent.</p>
+            <div className="flex flex-wrap gap-3">
+              <Select value={String(settings.report_day)} onValueChange={(v) => setSettings({ ...settings, report_day: Number(v) })}>
+                <SelectTrigger className="w-[180px] rounded-sm" data-testid="report-day-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DAYS.map((d, i) => <SelectItem key={d} value={String(i)} data-testid={`day-${i}`}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={String(settings.report_hour)} onValueChange={(v) => setSettings({ ...settings, report_hour: Number(v) })}>
+                <SelectTrigger className="w-[160px] rounded-sm" data-testid="report-hour-select"><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-64">
+                  {Array.from({ length: 24 }).map((_, h) => <SelectItem key={h} value={String(h)} data-testid={`hour-${h}`}>{String(h).padStart(2, "0")}:00 UTC</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <button className="btn-primary flex items-center gap-2" onClick={save} disabled={saving} data-testid="save-settings-btn">
