@@ -428,15 +428,17 @@ async def apollo_instantly_prospecting():
             email = (p.get("email") or "").strip().lower()
             org = (p.get("organization") or {}).get("name") or p.get("organization_name") or "Unknown Co"
             name = p.get("name") or f"{p.get('first_name','')} {p.get('last_name','')}".strip()
-            if not email:
+            dedupe = {"email": email} if email else {"company_name": org, "contact_name": name}
+            if email and (await db.contractors.find_one({"email": email})):
                 continue
-            if await db.contractors.find_one({"email": email}) or await db.prospects.find_one({"email": email}):
+            if await db.prospects.find_one(dedupe):
                 continue
             await db.prospects.insert_one({"company_name": org, "contact_name": name, "email": email,
                 "phone": p.get("phone") or "", "title": p.get("title") or "", "outreach_status": "NEW",
                 "sequence": SEQUENCE, "created_at": now_iso()})
-            pushed.append({"email": email, "first_name": p.get("first_name") or name.split(" ")[0],
-                           "last_name": p.get("last_name"), "company_name": org, "job_title": p.get("title")})
+            if email:
+                pushed.append({"email": email, "first_name": p.get("first_name") or name.split(" ")[0],
+                               "last_name": p.get("last_name"), "company_name": org, "job_title": p.get("title")})
             added += 1
         if pushed and INSTANTLY_API_KEY and INSTANTLY_CAMPAIGN_ID:
             await c.post("https://api.instantly.ai/api/v2/leads/add",

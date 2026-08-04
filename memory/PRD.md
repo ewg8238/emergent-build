@@ -30,6 +30,10 @@ End-to-end automated B2B micro-SaaS for General Contractors (GCs) to track, pars
 - Stripe subscription checkout + status polling + webhook provisioning.
 - Tested: backend 11/11 pass, all frontend flows pass.
 
-## Backlog
+## Implemented (2026-08-04) — Iteration 2
+- **Secure upload links**: expiring (14-day) single-use tokens on `subcontractors`; `/api/upload` validates token (403 on invalid/expired/reused); reminder cron regenerates a fresh token + link.
+- **COI document viewer**: uploaded files served at `/api/uploads/*`; dashboard "View" opens the certificate in a modal (image or PDF iframe).
+- **Twilio SMS (LIVE-wired)**: `send_sms` sends real SMS when `TWILIO_*` set, else simulated. Keys configured. NOTE: trial account only texts verified recipients until upgraded.
+- **Apollo.io + Instantly.ai (LIVE-wired)**: `run_prospecting` calls Apollo people search + Instantly campaign push when keys set, else mock. Apollo key configured but Free plan blocks the Search API (needs paid plan) → auto-falls back to mock. Instantly key/campaign not provided yet (push skipped).
 - **P1**: Signed/expiring token on public upload links; real Twilio SMS (needs keys); real Apollo/Instantly (needs keys).
 - **P2**: Split server.py into routers; document viewer for uploaded COIs; multi-user roles per contractor; email deliverability hardening (intermittent 422 from managed Resend under load).
