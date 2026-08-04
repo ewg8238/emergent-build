@@ -18,6 +18,7 @@ export default function Nav() {
             <>
               <Link to="/dashboard" className="text-sm font-medium hover:opacity-60" data-testid="nav-dashboard">Dashboard</Link>
               <Link to="/prospects" className="text-sm font-medium hover:opacity-60" data-testid="nav-prospects">Prospects</Link>
+              <Link to="/settings" className="text-sm font-medium hover:opacity-60" data-testid="nav-settings">Settings</Link>
               <button className="btn-outline !py-2 !px-4 flex items-center gap-2 text-sm"
                 onClick={async () => { await logout(); navigate("/"); }} data-testid="nav-logout">
                 <LogOut className="w-4 h-4" /> Logout

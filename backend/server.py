@@ -18,7 +18,7 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 import csv, io
 from fastapi.responses import Response as FileResponse
 from reportlab.lib.pagesizes import landscape, letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
@@ -123,6 +123,12 @@ class CheckoutReq(BaseModel):
     lookup_key: str = "pro_monthly"
     origin_url: str
     user_id: Optional[str] = None
+
+
+class SettingsReq(BaseModel):
+    brand_color: Optional[str] = None
+    escalation_threshold: Optional[int] = None
+    report_recipients: Optional[List[str]] = None
 
 
 # ---------- Notifications (email via Resend, SMS simulated) ----------
@@ -377,17 +383,33 @@ async def compliance_report_rows(contractor_id):
     return head, data, rows
 
 
-def build_compliance_pdf(company_name, head, data, rows) -> bytes:
+def _hexcolor(v, fallback="#000000"):
+    try:
+        return colors.HexColor(v)
+    except Exception:
+        return colors.HexColor(fallback)
+
+
+def build_compliance_pdf(company_name, head, data, rows, brand_color="#000000", logo_url=None) -> bytes:
     buf = io.BytesIO()
     pdf = SimpleDocTemplate(buf, pagesize=landscape(letter), title="COI Compliance Report")
     styles = getSampleStyleSheet()
-    elems = [Paragraph(f"COI Compliance Report — {company_name}", styles["Title"]),
-             Paragraph(datetime.now(timezone.utc).strftime("Generated %Y-%m-%d %H:%M UTC"), styles["Normal"]),
-             Spacer(1, 12)]
+    elems = []
+    if logo_url:
+        lp = ROOT_DIR / logo_url.lstrip("/").replace("api/uploads/", "uploads/")
+        if lp.exists():
+            try:
+                elems.append(RLImage(str(lp), width=150, height=50, kind="proportional", hAlign="LEFT"))
+                elems.append(Spacer(1, 8))
+            except Exception:
+                pass
+    elems.append(Paragraph(f"<font color='{brand_color}'>COI Compliance Report — {company_name}</font>", styles["Title"]))
+    elems.append(Paragraph(datetime.now(timezone.utc).strftime("Generated %Y-%m-%d %H:%M UTC"), styles["Normal"]))
+    elems.append(Spacer(1, 12))
     cmap = {"VALID": colors.HexColor("#02C039"), "EXPIRED": colors.HexColor("#FF3B30"),
             "NEEDS_REVIEW": colors.HexColor("#FF9500"), "INSUFFICIENT": colors.HexColor("#FF9500")}
     table = Table([head] + (data or [["No documents yet", "", "", "", "", "", "", ""]]), repeatRows=1)
-    style = [("BACKGROUND", (0, 0), (-1, 0), colors.black), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+    style = [("BACKGROUND", (0, 0), (-1, 0), _hexcolor(brand_color)), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
              ("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
              ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
              ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F7F7")])]
@@ -406,7 +428,8 @@ async def export_compliance(format: str = "csv", user: dict = Depends(get_curren
     head, data, rows = await compliance_report_rows(user["id"])
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
     if format == "pdf":
-        return FileResponse(content=build_compliance_pdf(user["company_name"], head, data, rows),
+        return FileResponse(content=build_compliance_pdf(user["company_name"], head, data, rows,
+                            user.get("brand_color") or "#000000", user.get("logo_url")),
                             media_type="application/pdf",
                             headers={"Content-Disposition": f"attachment; filename=coi_report_{stamp}.pdf"})
     buf = io.StringIO()
@@ -417,25 +440,32 @@ async def export_compliance(format: str = "csv", user: dict = Depends(get_curren
                         headers={"Content-Disposition": f"attachment; filename=coi_report_{stamp}.csv"})
 
 
-async def send_report_email(email, company_name, contractor_id):
-    head, data, rows = await compliance_report_rows(contractor_id)
+async def send_report_email(gc):
+    cid = gc.get("id") or str(gc.get("_id"))
+    email = gc["email"]
+    company_name = gc.get("company_name", "Your Company")
+    brand = gc.get("brand_color") or "#000000"
+    logo = gc.get("logo_url")
+    recipients = list(dict.fromkeys([email] + [r for r in (gc.get("report_recipients") or []) if r]))
+    head, data, rows = await compliance_report_rows(cid)
     counts = {"VALID": 0, "EXPIRED": 0, "NEEDS_REVIEW": 0, "INSUFFICIENT": 0}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
-    pdf_bytes = build_compliance_pdf(company_name, head, data, rows)
+    pdf_bytes = build_compliance_pdf(company_name, head, data, rows, brand, logo)
     rdir = ROOT_DIR / "uploads" / "reports"
     rdir.mkdir(parents=True, exist_ok=True)
-    fname = f"{contractor_id}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    fname = f"{cid}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     (rdir / fname).write_bytes(pdf_bytes)
     pdf_url = f"{FRONTEND_URL}/api/uploads/reports/{fname}"
     cc = {"VALID": "#02C039", "EXPIRED": "#FF3B30", "NEEDS_REVIEW": "#FF9500", "INSUFFICIENT": "#FF9500"}
+    logo_html = f"<img src='{FRONTEND_URL}{logo}' alt='logo' style='max-height:48px;margin-bottom:8px'/><br/>" if logo else ""
     body_rows = "".join(
         f"<tr><td style='padding:8px;border-bottom:1px solid #eee'>{r['subcontractor_name']}</td>"
         f"<td style='padding:8px;border-bottom:1px solid #eee'>{r.get('gl_expiration_date') or '—'}</td>"
         f"<td style='padding:8px;border-bottom:1px solid #eee;color:{cc.get(r['status'],'#111')};font-weight:600'>{r['status']}</td></tr>"
         for r in rows) or "<tr><td colspan='3' style='padding:8px'>No subcontractors yet.</td></tr>"
-    html = (f"<div style='font-family:Arial;max-width:640px'>"
-            f"<h2 style='margin-bottom:4px'>Weekly COI Compliance Summary</h2>"
+    html = (f"<div style='font-family:Arial;max-width:640px'>{logo_html}"
+            f"<h2 style='margin-bottom:4px;color:{brand}'>Weekly COI Compliance Summary</h2>"
             f"<p style='color:#666;margin-top:0'>{company_name} — {datetime.now(timezone.utc).strftime('%B %d, %Y')}</p>"
             f"<p><b style='color:#02C039'>{counts['VALID']} Valid</b> &nbsp;·&nbsp; "
             f"<b style='color:#FF3B30'>{counts['EXPIRED']} Expired</b> &nbsp;·&nbsp; "
@@ -445,14 +475,15 @@ async def send_report_email(email, company_name, contractor_id):
             f"<tr><th align='left' style='padding:8px;border-bottom:2px solid #000'>Subcontractor</th>"
             f"<th align='left' style='padding:8px;border-bottom:2px solid #000'>Expiration</th>"
             f"<th align='left' style='padding:8px;border-bottom:2px solid #000'>Status</th></tr>{body_rows}</table>"
-            f"<p style='margin-top:20px'><a href='{pdf_url}' style='background:#000;color:#fff;padding:10px 20px;text-decoration:none'>Download full PDF report</a></p></div>")
-    await send_email(email, f"Weekly COI Compliance Summary — {company_name}", html)
+            f"<p style='margin-top:20px'><a href='{pdf_url}' style='background:{brand};color:#fff;padding:10px 20px;text-decoration:none'>Download full PDF report</a></p></div>")
+    for to in recipients:
+        await send_email(to, f"Weekly COI Compliance Summary — {company_name}", html)
 
 
 async def run_weekly_reports():
     sent = 0
     for gc in await db.contractors.find({}).to_list(1000):
-        await send_report_email(gc["email"], gc.get("company_name", "Your Company"), str(gc["_id"]))
+        await send_report_email(gc)
         sent += 1
     return {"reports_sent": sent}
 
@@ -464,8 +495,43 @@ async def cron_weekly_reports(user: dict = Depends(get_current_user)):
 
 @api.post("/reports/email-me")
 async def email_me_report(user: dict = Depends(get_current_user)):
-    await send_report_email(user["email"], user["company_name"], user["id"])
+    gc = await db.contractors.find_one({"_id": ObjectId(user["id"])})
+    await send_report_email(gc)
     return {"sent": True, "to": user["email"]}
+
+
+@api.get("/settings")
+async def get_settings(user: dict = Depends(get_current_user)):
+    return {"company_name": user["company_name"], "brand_color": user.get("brand_color", "#111111"),
+            "logo_url": user.get("logo_url"), "escalation_threshold": user.get("escalation_threshold", 3),
+            "report_recipients": user.get("report_recipients", [])}
+
+
+@api.put("/settings")
+async def update_settings(body: SettingsReq, user: dict = Depends(get_current_user)):
+    upd = {}
+    if body.brand_color is not None:
+        upd["brand_color"] = body.brand_color
+    if body.escalation_threshold is not None:
+        upd["escalation_threshold"] = int(body.escalation_threshold)
+    if body.report_recipients is not None:
+        upd["report_recipients"] = [e.strip() for e in body.report_recipients if e and e.strip()]
+    if upd:
+        await db.contractors.update_one({"_id": ObjectId(user["id"])}, {"$set": upd})
+    return {"ok": True, **upd}
+
+
+@api.post("/settings/logo")
+async def upload_logo(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    raw = await file.read()
+    ldir = ROOT_DIR / "uploads" / "logos"
+    ldir.mkdir(parents=True, exist_ok=True)
+    ext = os.path.splitext(file.filename or "logo.png")[1] or ".png"
+    fname = f"{user['id']}{ext}"
+    (ldir / fname).write_bytes(raw)
+    url = f"/api/uploads/logos/{fname}"
+    await db.contractors.update_one({"_id": ObjectId(user["id"])}, {"$set": {"logo_url": url}})
+    return {"logo_url": url}
 
 
 @api.get("/dashboard/stats")
@@ -504,14 +570,14 @@ async def run_expiration_check():
                              f"<p>Hi {sub['contact_name']}, your COI expires on {exp}. <a href='{link}'>Upload updated paperwork here</a>.</p>")
             await send_sms(sub.get("phone", ""), f"Reminder #{n}: your COI expires {exp}. Upload updated paperwork: {link}")
             nudged += 1
-            if n >= 3 and not sub.get("escalated"):
-                gc = await db.contractors.find_one({"_id": ObjectId(sub["contractor_id"])}) if ObjectId.is_valid(sub.get("contractor_id", "")) else None
-                if gc:
-                    await send_email(gc["email"], f"Action needed: {sub['company_name']} is ignoring COI reminders",
-                                     f"<div style='font-family:Arial'><h2>Compliance escalation</h2>"
-                                     f"<p><b>{sub['company_name']}</b> ({sub['contact_name']}, {sub['email']}, {sub.get('phone','')}) "
-                                     f"has received {n} COI renewal reminders without uploading updated paperwork. "
-                                     f"Their policy expires {exp}. Please follow up directly.</p></div>")
+            gc = await db.contractors.find_one({"_id": ObjectId(sub["contractor_id"])}) if ObjectId.is_valid(sub.get("contractor_id", "")) else None
+            threshold = (gc or {}).get("escalation_threshold", 3)
+            if gc and n >= threshold and not sub.get("escalated"):
+                await send_email(gc["email"], f"Action needed: {sub['company_name']} is ignoring COI reminders",
+                                 f"<div style='font-family:Arial'><h2>Compliance escalation</h2>"
+                                 f"<p><b>{sub['company_name']}</b> ({sub['contact_name']}, {sub['email']}, {sub.get('phone','')}) "
+                                 f"has received {n} COI renewal reminders without uploading updated paperwork. "
+                                 f"Their policy expires {exp}. Please follow up directly.</p></div>")
                 await db.subcontractors.update_one({"_id": sub["_id"]}, {"$set": {"escalated": True}})
                 escalated += 1
     return {"scanned": len(docs), "nudged": nudged, "escalated": escalated}

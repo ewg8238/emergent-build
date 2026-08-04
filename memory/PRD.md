@@ -44,3 +44,10 @@ End-to-end automated B2B micro-SaaS for General Contractors (GCs) to track, pars
 - **Renewal auto-chase**: `run_expiration_check` re-nudges email+SMS on a 3-day cadence via `last_nudged_at`/`nudge_count` ("Reminder #n"); resets on VALID upload.
 - **Compliance export**: `GET /api/compliance-documents/export?format=csv|pdf` (reportlab color-coded PDF). Dashboard CSV/PDF buttons.
 - NOTE: Apollo Free plan still blocks Search API → prospecting falls back to mock leads (which now enroll into Instantly). Twilio still trial (verified recipients only).
+
+
+## Implemented (2026-08-04) — Iteration 4
+- **Scheduled weekly reports**: Monday 07:00 cron `run_weekly_reports` emails each GC an inline HTML compliance summary + link to auto-generated PDF (managed Resend has no attachments). Manual "Email" button on dashboard (`/api/reports/email-me`).
+- **Escalation alerts**: GC emailed when a sub ignores >= threshold reminders (per-GC configurable), `escalated` flag prevents repeats, resets on VALID upload.
+- **Company settings** (`GET/PUT /api/settings`, `POST /api/settings/logo`): logo upload (served `/api/uploads/logos/*`), brand color, escalation threshold (2/3/5), extra weekly-report recipients. New `/settings` page + nav link.
+- **Branded PDF/email**: `build_compliance_pdf` renders GC logo + brand color on title and header row; report email uses brand color + logo. Verified visually.
