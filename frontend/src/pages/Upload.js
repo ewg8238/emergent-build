@@ -9,6 +9,7 @@ export default function Upload() {
   const [params] = useSearchParams();
   const sub_id = params.get("sub_id") || "";
   const gc_id = params.get("gc_id") || "";
+    const token = params.get("token") || "";
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -21,16 +22,17 @@ export default function Upload() {
     const fd = new FormData();
     fd.append("sub_id", sub_id);
     fd.append("gc_id", gc_id);
+    fd.append("token", token);
     fd.append("file", file);
     try {
       const { data } = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
       setResult(data);
     } catch (err) {
-      setError("Upload failed. Please try again with a clear photo or PDF of your COI.");
+      setError(err.response?.data?.detail || "Upload failed. Please try again with a clear photo or PDF of your COI.");
     } finally { setLoading(false); }
   };
 
-  const invalidLink = !sub_id || !gc_id;
+  const invalidLink = !sub_id || !gc_id || !token;
 
   return (
     <div className="min-h-screen grid md:grid-cols-2">

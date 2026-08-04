@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-import os, logging, uuid, base64, json, asyncio
+import os, logging, uuid, base64, json, asyncio, secrets
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Annotated, Any
 
@@ -32,6 +32,12 @@ EMAIL_FROM_NAME = os.environ["EMAIL_FROM_NAME"]
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY") or "sk_test_emergent"
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM = os.environ.get("TWILIO_PHONE_NUMBER", "")
+APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY", "")
+INSTANTLY_API_KEY = os.environ.get("INSTANTLY_API_KEY", "")
+INSTANTLY_CAMPAIGN_ID = os.environ.get("INSTANTLY_CAMPAIGN_ID", "")
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
@@ -131,14 +137,35 @@ async def send_email(to: str, subject: str, html: str):
 
 
 async def send_sms(to: str, body: str):
-    # SMS is SIMULATED for the demo (logged to DB). Wire Twilio keys to send real SMS.
+    # Real SMS via Twilio when keys are configured; otherwise SIMULATED (logged to DB).
+    status = "simulated"
+    if TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM and to and to not in ("unknown", ""):
+        try:
+            from twilio.rest import Client as TwilioClient
+
+            def _send():
+                TwilioClient(TWILIO_SID, TWILIO_TOKEN).messages.create(to=to, from_=TWILIO_FROM, body=body)
+            await asyncio.to_thread(_send)
+            status = "sent"
+        except Exception as e:
+            logger.error(f"twilio fail: {e}")
+            status = "failed"
+    else:
+        logger.info(f"[SIMULATED SMS] to {to}: {body}")
     await db.notifications.insert_one({"channel": "sms", "to": to, "subject": "SMS",
-                                       "body": body, "status": "simulated", "created_at": now_iso()})
-    logger.info(f"[SIMULATED SMS] to {to}: {body}")
+                                       "body": body, "status": status, "created_at": now_iso()})
 
 
-def upload_link(sub_id, gc_id):
-    return f"{FRONTEND_URL}/upload?sub_id={sub_id}&gc_id={gc_id}"
+def new_upload_token():
+    return secrets.token_urlsafe(24)
+
+
+def token_expiry():
+    return (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+
+
+def upload_link(sub_id, gc_id, token):
+    return f"{FRONTEND_URL}/upload?sub_id={sub_id}&gc_id={gc_id}&token={token}"
 
 
 # ---------- AUTH ROUTES ----------
@@ -186,12 +213,14 @@ async def me(user: dict = Depends(get_current_user)):
 @api.post("/subcontractors/invite")
 async def invite_subcontractor(body: InviteReq, user: dict = Depends(get_current_user)):
     gc_id = user["id"]
+    token = new_upload_token()
     doc = {"contractor_id": gc_id, "company_name": body.company_name, "contact_name": body.contact_name,
-           "email": body.email.lower(), "phone": body.phone, "created_at": now_iso()}
+           "email": body.email.lower(), "phone": body.phone, "created_at": now_iso(),
+           "upload_token": token, "upload_token_expires": token_expiry(), "upload_token_used": False}
     res = await db.subcontractors.insert_one(doc)
     sub_id = str(res.inserted_id)
     doc.pop("_id", None)
-    link = upload_link(sub_id, gc_id)
+    link = upload_link(sub_id, gc_id, token)
     html = f"""<table width="100%"><tr><td style="font-family:Arial;padding:24px">
     <h2>COI Upload Request from {user['company_name']}</h2>
     <p>Hi {body.contact_name}, please upload your current Certificate of Insurance (COI).</p>
@@ -252,7 +281,14 @@ def validate_coi(parsed: dict) -> tuple:
 
 
 @api.post("/upload")
-async def upload_coi(sub_id: str = Form(...), gc_id: str = Form(...), file: UploadFile = File(...)):
+async def upload_coi(sub_id: str = Form(...), gc_id: str = Form(...), token: str = Form(""), file: UploadFile = File(...)):
+    sub = await db.subcontractors.find_one({"_id": ObjectId(sub_id)}) if ObjectId.is_valid(sub_id) else None
+    if not sub or not sub.get("upload_token") or sub.get("upload_token") != token:
+        raise HTTPException(403, "Invalid upload link. Please use the secure link sent to you.")
+    if sub.get("upload_token_expires") and sub["upload_token_expires"] < now_iso():
+        raise HTTPException(403, "This upload link has expired. Please request a new one.")
+    if sub.get("upload_token_used"):
+        raise HTTPException(403, "This upload link has already been used. Please request a new one.")
     raw = await file.read()
     ct = (file.content_type or "").lower()
     fname = file.filename or "coi"
@@ -288,6 +324,7 @@ async def upload_coi(sub_id: str = Form(...), gc_id: str = Form(...), file: Uplo
            "status": status, "review_reason": reason,
            "document_url": f"/api/uploads/{saved.name}", "created_at": now_iso()}
     await db.compliance_documents.update_one({"subcontractor_id": sub_id}, {"$set": doc}, upsert=True)
+    await db.subcontractors.update_one({"_id": ObjectId(sub_id)}, {"$set": {"upload_token_used": True}})
 
     sub = await db.subcontractors.find_one({"_id": ObjectId(sub_id)}) if ObjectId.is_valid(sub_id) else None
     gc = await db.contractors.find_one({"_id": ObjectId(gc_id)}) if ObjectId.is_valid(gc_id) else None
@@ -343,9 +380,13 @@ async def run_expiration_check():
                 "review_reason": "Policy expired" if new_status == "EXPIRED" else "Expiring within 30 days"}})
         sub = await db.subcontractors.find_one({"_id": ObjectId(d["subcontractor_id"])}) if ObjectId.is_valid(d.get("subcontractor_id", "")) else None
         if sub:
+            tok = new_upload_token()
+            await db.subcontractors.update_one({"_id": sub["_id"]}, {"$set": {
+                "upload_token": tok, "upload_token_expires": token_expiry(), "upload_token_used": False}})
+            link = upload_link(str(sub["_id"]), sub["contractor_id"], tok)
             await send_email(sub["email"], "Your COI is expiring soon — please renew",
-                             f"<p>Hi {sub['contact_name']}, your Certificate of Insurance expires on {exp}. Please upload updated paperwork.</p>")
-            await send_sms(sub.get("phone", ""), f"Reminder: your COI expires {exp}. Please send updated paperwork.")
+                             f"<p>Hi {sub['contact_name']}, your COI expires on {exp}. <a href='{link}'>Upload updated paperwork here</a>.</p>")
+            await send_sms(sub.get("phone", ""), f"Reminder: your COI expires {exp}. Upload updated paperwork: {link}")
             nudged += 1
     return {"scanned": len(docs), "nudged": nudged}
 
@@ -371,7 +412,46 @@ SEQUENCE = [
 ]
 
 
+async def apollo_instantly_prospecting():
+    """Live: Apollo people search (GC titles, commercial construction, 10-200) -> dedupe -> Instantly campaign."""
+    headers = {"x-api-key": APOLLO_API_KEY, "Content-Type": "application/json"}
+    body = {"page": 1, "per_page": 25,
+            "person_titles[]": ["Owner", "VP of Construction", "Project Manager"],
+            "q_organization_keyword_tags[]": ["commercial construction"],
+            "organization_num_employees_ranges[]": ["10,200"]}
+    added, pushed = 0, []
+    async with httpx.AsyncClient(timeout=40) as c:
+        r = await c.post("https://api.apollo.io/api/v1/mixed_people/api_search", headers=headers, json=body)
+        r.raise_for_status()
+        people = r.json().get("people", [])
+        for p in people:
+            email = (p.get("email") or "").strip().lower()
+            org = (p.get("organization") or {}).get("name") or p.get("organization_name") or "Unknown Co"
+            name = p.get("name") or f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            if not email:
+                continue
+            if await db.contractors.find_one({"email": email}) or await db.prospects.find_one({"email": email}):
+                continue
+            await db.prospects.insert_one({"company_name": org, "contact_name": name, "email": email,
+                "phone": p.get("phone") or "", "title": p.get("title") or "", "outreach_status": "NEW",
+                "sequence": SEQUENCE, "created_at": now_iso()})
+            pushed.append({"email": email, "first_name": p.get("first_name") or name.split(" ")[0],
+                           "last_name": p.get("last_name"), "company_name": org, "job_title": p.get("title")})
+            added += 1
+        if pushed and INSTANTLY_API_KEY and INSTANTLY_CAMPAIGN_ID:
+            await c.post("https://api.instantly.ai/api/v2/leads/add",
+                         headers={"Authorization": f"Bearer {INSTANTLY_API_KEY}", "Content-Type": "application/json"},
+                         json={"campaign_id": INSTANTLY_CAMPAIGN_ID, "leads": pushed,
+                               "skip_if_in_workspace": True, "skip_if_in_campaign": True, "verify_leads_on_import": True})
+    return {"added": added, "sequence_steps": len(SEQUENCE), "source": "apollo"}
+
+
 async def run_prospecting():
+    if APOLLO_API_KEY:
+        try:
+            return await apollo_instantly_prospecting()
+        except Exception as e:
+            logger.error(f"apollo/instantly fail, falling back to mock: {e}")
     added = 0
     for lead in MOCK_LEADS:
         if await db.contractors.find_one({"email": lead["email"]}) or await db.prospects.find_one({"email": lead["email"]}):
@@ -379,7 +459,7 @@ async def run_prospecting():
         await db.prospects.insert_one({**lead, "outreach_status": "NEW", "sequence": SEQUENCE,
                                        "created_at": now_iso()})
         added += 1
-    return {"added": added, "sequence_steps": len(SEQUENCE)}
+    return {"added": added, "sequence_steps": len(SEQUENCE), "source": "mock"}
 
 
 @api.post("/cron/prospecting")

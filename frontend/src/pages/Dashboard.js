@@ -5,9 +5,11 @@ import { StatusPill } from "@/components/StatusPill";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Search, RefreshCw, Bell, CheckCircle2, AlertTriangle, XCircle, FileWarning } from "lucide-react";
+import { Plus, Search, RefreshCw, Bell, CheckCircle2, AlertTriangle, XCircle, FileWarning, Eye } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const money = (n) => (n == null ? "—" : `$${Number(n).toLocaleString()}`);
 
 export default function Dashboard() {
@@ -17,6 +19,7 @@ export default function Dashboard() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("ALL");
   const [loading, setLoading] = useState(true);
+  const [viewDoc, setViewDoc] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -99,16 +102,16 @@ export default function Dashboard() {
           <table className="w-full text-sm" data-testid="compliance-table">
             <thead>
               <tr className="border-b border-neutral-200 text-left text-neutral-500">
-                {["Subcontractor", "Policy #", "GL Limit", "Expiration", "Status", "Notes"].map((h) => (
+                {["Subcontractor", "Policy #", "GL Limit", "Expiration", "Status", "COI", "Notes"].map((h) => (
                   <th key={h} className="px-4 py-3 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-neutral-400 mono">Loading…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-neutral-400 mono">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-neutral-400">No documents. Invite a subcontractor to begin.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-neutral-400">No documents. Invite a subcontractor to begin.</td></tr>
               ) : filtered.map((d) => (
                 <tr key={d.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors" data-testid={`doc-row-${d.id}`}>
                   <td className="px-4 py-3">
@@ -119,6 +122,13 @@ export default function Dashboard() {
                   <td className="px-4 py-3 mono">{money(d.general_liability_limit)}</td>
                   <td className="px-4 py-3 mono">{d.gl_expiration_date || "—"}</td>
                   <td className="px-4 py-3"><StatusPill status={d.status} /></td>
+                  <td className="px-4 py-3">
+                    {d.document_url ? (
+                      <button className="flex items-center gap-1 text-sm underline hover:opacity-60" onClick={() => setViewDoc(d)} data-testid={`view-doc-${d.id}`}>
+                        <Eye className="w-4 h-4" /> View
+                      </button>
+                    ) : <span className="text-xs text-neutral-300">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-xs text-neutral-500 max-w-[220px]">{d.review_reason || "—"}</td>
                 </tr>
               ))}
@@ -126,6 +136,19 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+
+      <Dialog open={!!viewDoc} onOpenChange={(o) => !o && setViewDoc(null)}>
+        <DialogContent className="max-w-3xl" data-testid="coi-viewer">
+          <DialogHeader><DialogTitle>{viewDoc?.subcontractor_name} — Certificate of Insurance</DialogTitle></DialogHeader>
+          {viewDoc && (
+            (viewDoc.document_url || "").toLowerCase().endsWith(".pdf") ? (
+              <iframe title="coi" src={`${BACKEND_URL}${viewDoc.document_url}`} className="w-full h-[70vh] border" />
+            ) : (
+              <img alt="coi" src={`${BACKEND_URL}${viewDoc.document_url}`} className="w-full max-h-[70vh] object-contain border" />
+            )
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
