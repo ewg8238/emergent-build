@@ -190,6 +190,7 @@ async def invite_subcontractor(body: InviteReq, user: dict = Depends(get_current
            "email": body.email.lower(), "phone": body.phone, "created_at": now_iso()}
     res = await db.subcontractors.insert_one(doc)
     sub_id = str(res.inserted_id)
+    doc.pop("_id", None)
     link = upload_link(sub_id, gc_id)
     html = f"""<table width="100%"><tr><td style="font-family:Arial;padding:24px">
     <h2>COI Upload Request from {user['company_name']}</h2>
