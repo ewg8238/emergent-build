@@ -37,3 +37,10 @@ End-to-end automated B2B micro-SaaS for General Contractors (GCs) to track, pars
 - **Apollo.io + Instantly.ai (LIVE-wired)**: `run_prospecting` calls Apollo people search + Instantly campaign push when keys set, else mock. Apollo key configured but Free plan blocks the Search API (needs paid plan) → auto-falls back to mock. Instantly key/campaign not provided yet (push skipped).
 - **P1**: Signed/expiring token on public upload links; real Twilio SMS (needs keys); real Apollo/Instantly (needs keys).
 - **P2**: Split server.py into routers; document viewer for uploaded COIs; multi-user roles per contractor; email deliverability hardening (intermittent 422 from managed Resend under load).
+
+
+## Implemented (2026-08-04) — Iteration 3
+- **Instantly.ai enrollment (LIVE)**: `instantly_add_leads()` enrolls prospects into campaign `bb9e480a-55ab-44c7-8fa6-60e030d27c68` via V2 `/api/v2/leads` (verified). Runs from Apollo + mock paths.
+- **Renewal auto-chase**: `run_expiration_check` re-nudges email+SMS on a 3-day cadence via `last_nudged_at`/`nudge_count` ("Reminder #n"); resets on VALID upload.
+- **Compliance export**: `GET /api/compliance-documents/export?format=csv|pdf` (reportlab color-coded PDF). Dashboard CSV/PDF buttons.
+- NOTE: Apollo Free plan still blocks Search API → prospecting falls back to mock leads (which now enroll into Instantly). Twilio still trial (verified recipients only).

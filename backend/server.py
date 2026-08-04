@@ -15,6 +15,12 @@ from bson import ObjectId
 from pydantic import BaseModel, Field, EmailStr, BeforeValidator, ConfigDict
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+import csv, io
+from fastapi.responses import Response as FileResponse
+from reportlab.lib.pagesizes import landscape, letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("coi")
@@ -324,7 +330,10 @@ async def upload_coi(sub_id: str = Form(...), gc_id: str = Form(...), token: str
            "status": status, "review_reason": reason,
            "document_url": f"/api/uploads/{saved.name}", "created_at": now_iso()}
     await db.compliance_documents.update_one({"subcontractor_id": sub_id}, {"$set": doc}, upsert=True)
-    await db.subcontractors.update_one({"_id": ObjectId(sub_id)}, {"$set": {"upload_token_used": True}})
+    sub_update = {"upload_token_used": True}
+    if status == "VALID":
+        sub_update.update({"last_nudged_at": None, "nudge_count": 0})
+    await db.subcontractors.update_one({"_id": ObjectId(sub_id)}, {"$set": sub_update})
 
     sub = await db.subcontractors.find_one({"_id": ObjectId(sub_id)}) if ObjectId.is_valid(sub_id) else None
     gc = await db.contractors.find_one({"_id": ObjectId(gc_id)}) if ObjectId.is_valid(gc_id) else None
@@ -357,6 +366,47 @@ async def compliance_docs(user: dict = Depends(get_current_user)):
     return await enrich_docs(docs)
 
 
+@api.get("/compliance-documents/export")
+async def export_compliance(format: str = "csv", user: dict = Depends(get_current_user)):
+    docs = await db.compliance_documents.find({"contractor_id": user["id"]}).sort("created_at", -1).to_list(1000)
+    rows = await enrich_docs(docs)
+    head = ["Subcontractor", "Contact", "Email", "Policy #", "GL Limit", "Expiration", "Status", "Notes"]
+    data = [[r["subcontractor_name"], r.get("contact_name", ""), r.get("contact_email", ""),
+             r.get("gl_policy_number") or "",
+             f"${int(r['general_liability_limit']):,}" if r.get("general_liability_limit") else "",
+             r.get("gl_expiration_date") or "", r["status"], r.get("review_reason") or ""] for r in rows]
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    if format == "pdf":
+        buf = io.BytesIO()
+        pdf = SimpleDocTemplate(buf, pagesize=landscape(letter), title="COI Compliance Report")
+        styles = getSampleStyleSheet()
+        elems = [Paragraph(f"COI Compliance Report — {user['company_name']}", styles["Title"]),
+                 Paragraph(datetime.now(timezone.utc).strftime("Generated %Y-%m-%d %H:%M UTC"), styles["Normal"]),
+                 Spacer(1, 12)]
+        cmap = {"VALID": colors.HexColor("#02C039"), "EXPIRED": colors.HexColor("#FF3B30"),
+                "NEEDS_REVIEW": colors.HexColor("#FF9500"), "INSUFFICIENT": colors.HexColor("#FF9500")}
+        table = Table([head] + data, repeatRows=1)
+        style = [("BACKGROUND", (0, 0), (-1, 0), colors.black), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                 ("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F7F7")])]
+        for i, r in enumerate(rows, start=1):
+            c = cmap.get(r["status"])
+            if c:
+                style.append(("TEXTCOLOR", (6, i), (6, i), c))
+        table.setStyle(TableStyle(style))
+        elems.append(table)
+        pdf.build(elems)
+        return FileResponse(content=buf.getvalue(), media_type="application/pdf",
+                            headers={"Content-Disposition": f"attachment; filename=coi_report_{stamp}.pdf"})
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(head)
+    w.writerows(data)
+    return FileResponse(content=buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename=coi_report_{stamp}.csv"})
+
+
 @api.get("/dashboard/stats")
 async def stats(user: dict = Depends(get_current_user)):
     docs = await db.compliance_documents.find({"contractor_id": user["id"]}).to_list(1000)
@@ -380,13 +430,18 @@ async def run_expiration_check():
                 "review_reason": "Policy expired" if new_status == "EXPIRED" else "Expiring within 30 days"}})
         sub = await db.subcontractors.find_one({"_id": ObjectId(d["subcontractor_id"])}) if ObjectId.is_valid(d.get("subcontractor_id", "")) else None
         if sub:
+            last = sub.get("last_nudged_at")
+            if last and (datetime.now(timezone.utc) - datetime.fromisoformat(last)) < timedelta(days=3):
+                continue
+            n = sub.get("nudge_count", 0) + 1
             tok = new_upload_token()
             await db.subcontractors.update_one({"_id": sub["_id"]}, {"$set": {
-                "upload_token": tok, "upload_token_expires": token_expiry(), "upload_token_used": False}})
+                "upload_token": tok, "upload_token_expires": token_expiry(), "upload_token_used": False,
+                "last_nudged_at": now_iso(), "nudge_count": n}})
             link = upload_link(str(sub["_id"]), sub["contractor_id"], tok)
-            await send_email(sub["email"], "Your COI is expiring soon — please renew",
+            await send_email(sub["email"], f"Reminder #{n}: your COI is expiring — please renew",
                              f"<p>Hi {sub['contact_name']}, your COI expires on {exp}. <a href='{link}'>Upload updated paperwork here</a>.</p>")
-            await send_sms(sub.get("phone", ""), f"Reminder: your COI expires {exp}. Upload updated paperwork: {link}")
+            await send_sms(sub.get("phone", ""), f"Reminder #{n}: your COI expires {exp}. Upload updated paperwork: {link}")
             nudged += 1
     return {"scanned": len(docs), "nudged": nudged}
 
@@ -410,6 +465,22 @@ SEQUENCE = [
     {"day": 4, "subject": "How GCs cut COI admin 90%", "body": "AI parses every COI + 30-day background SMS/email drips keep subs compliant."},
     {"day": 8, "subject": "Start your 14-day trial", "body": "See it live and start your Pro trial ($149/mo)."},
 ]
+
+
+async def instantly_add_leads(leads):
+    if not (INSTANTLY_API_KEY and INSTANTLY_CAMPAIGN_ID and leads):
+        return
+    async with httpx.AsyncClient(timeout=40) as c:
+        for ld in leads:
+            try:
+                await c.post("https://api.instantly.ai/api/v2/leads",
+                             headers={"Authorization": f"Bearer {INSTANTLY_API_KEY}", "Content-Type": "application/json"},
+                             json={"campaign": INSTANTLY_CAMPAIGN_ID, "email": ld["email"],
+                                   "first_name": ld.get("first_name"), "last_name": ld.get("last_name"),
+                                   "company_name": ld.get("company_name"),
+                                   "skip_if_in_campaign": True, "skip_if_in_workspace": True})
+            except Exception as e:
+                logger.error(f"instantly add fail: {e}")
 
 
 async def apollo_instantly_prospecting():
@@ -440,11 +511,7 @@ async def apollo_instantly_prospecting():
                 pushed.append({"email": email, "first_name": p.get("first_name") or name.split(" ")[0],
                                "last_name": p.get("last_name"), "company_name": org, "job_title": p.get("title")})
             added += 1
-        if pushed and INSTANTLY_API_KEY and INSTANTLY_CAMPAIGN_ID:
-            await c.post("https://api.instantly.ai/api/v2/leads/add",
-                         headers={"Authorization": f"Bearer {INSTANTLY_API_KEY}", "Content-Type": "application/json"},
-                         json={"campaign_id": INSTANTLY_CAMPAIGN_ID, "leads": pushed,
-                               "skip_if_in_workspace": True, "skip_if_in_campaign": True, "verify_leads_on_import": True})
+    await instantly_add_leads(pushed)
     return {"added": added, "sequence_steps": len(SEQUENCE), "source": "apollo"}
 
 
@@ -454,13 +521,17 @@ async def run_prospecting():
             return await apollo_instantly_prospecting()
         except Exception as e:
             logger.error(f"apollo/instantly fail, falling back to mock: {e}")
-    added = 0
+    added, pushed = 0, []
     for lead in MOCK_LEADS:
         if await db.contractors.find_one({"email": lead["email"]}) or await db.prospects.find_one({"email": lead["email"]}):
             continue
         await db.prospects.insert_one({**lead, "outreach_status": "NEW", "sequence": SEQUENCE,
                                        "created_at": now_iso()})
+        parts = lead["contact_name"].split(" ")
+        pushed.append({"email": lead["email"], "first_name": parts[0], "last_name": parts[-1],
+                       "company_name": lead["company_name"]})
         added += 1
+    await instantly_add_leads(pushed)
     return {"added": added, "sequence_steps": len(SEQUENCE), "source": "mock"}
 
 

@@ -5,7 +5,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Search, RefreshCw, Bell, CheckCircle2, AlertTriangle, XCircle, FileWarning, Eye } from "lucide-react";
+import { Plus, Search, RefreshCw, Bell, CheckCircle2, AlertTriangle, XCircle, FileWarning, Eye, Download } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -37,6 +37,22 @@ export default function Dashboard() {
       toast.success(`Scanned ${data.scanned} docs • ${data.nudged} reminders sent`, { id: t });
       load();
     } catch { toast.error("Failed to run reminders", { id: t }); }
+  };
+
+  const exportReport = async (fmt) => {
+    const t = toast.loading(`Generating ${fmt.toUpperCase()} report…`);
+    try {
+      const res = await api.get(`/compliance-documents/export?format=${fmt}`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `coi_report.${fmt}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`${fmt.toUpperCase()} downloaded`, { id: t });
+    } catch { toast.error("Export failed", { id: t }); }
   };
 
   const filtered = docs.filter((d) => {
@@ -96,6 +112,8 @@ export default function Dashboard() {
             </SelectContent>
           </Select>
           <button className="btn-outline !py-2.5 !px-4" onClick={load} data-testid="refresh-btn"><RefreshCw className="w-4 h-4" /></button>
+          <button className="btn-outline !py-2.5 !px-4 text-sm flex items-center gap-2" onClick={() => exportReport("csv")} data-testid="export-csv-btn"><Download className="w-4 h-4" /> CSV</button>
+          <button className="btn-outline !py-2.5 !px-4 text-sm flex items-center gap-2" onClick={() => exportReport("pdf")} data-testid="export-pdf-btn"><Download className="w-4 h-4" /> PDF</button>
         </div>
 
         <div className="border border-neutral-200 bg-white overflow-x-auto">
