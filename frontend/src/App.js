@@ -10,6 +10,7 @@ import InviteSubcontractor from "@/pages/InviteSubcontractor";
 import Upload from "@/pages/Upload";
 import Prospects from "@/pages/Prospects";
 import Settings from "@/pages/Settings";
+import Onboarding from "@/pages/Onboarding";
 import PaymentResult from "@/pages/PaymentResult";
 import "@/App.css";
 
@@ -30,12 +31,14 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/upload" element={<Upload />} />
+            <Route path="/u/:slug" element={<Upload />} />
             <Route path="/payment/success" element={<PaymentResult />} />
             <Route path="/payment/cancel" element={<PaymentResult />} />
             <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
             <Route path="/invite-subcontractor" element={<Protected><InviteSubcontractor /></Protected>} />
             <Route path="/prospects" element={<Protected><Prospects /></Protected>} />
             <Route path="/settings" element={<Protected><Settings /></Protected>} />
+            <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
           </Routes>
         </BrowserRouter>
         <Toaster position="top-right" />

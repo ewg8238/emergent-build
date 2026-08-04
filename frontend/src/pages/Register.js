@@ -17,7 +17,7 @@ export default function Register() {
     setError(""); setLoading(true);
     try {
       await register(form);
-      navigate("/dashboard");
+      navigate("/onboarding");
     } catch (err) {
       setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
     } finally { setLoading(false); }

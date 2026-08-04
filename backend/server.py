@@ -3,8 +3,9 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-import os, logging, uuid, base64, json, asyncio, secrets
+import os, logging, uuid, base64, json, asyncio, secrets, re
 from datetime import datetime, timezone, timedelta, date
+from zoneinfo import ZoneInfo
 from typing import List, Optional, Annotated, Any
 
 import bcrypt, jwt, httpx, stripe, fitz
@@ -131,6 +132,9 @@ class SettingsReq(BaseModel):
     report_recipients: Optional[List[str]] = None
     report_day: Optional[int] = None
     report_hour: Optional[int] = None
+    timezone: Optional[str] = None
+    slug: Optional[str] = None
+    onboarded: Optional[bool] = None
 
 
 # ---------- Notifications (email via Resend, SMS simulated) ----------
@@ -174,12 +178,27 @@ def new_upload_token():
     return secrets.token_urlsafe(24)
 
 
+def slugify(name):
+    s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return s or "gc"
+
+
+async def unique_slug(base, exclude_id=None):
+    slug, i = base, 1
+    while True:
+        existing = await db.contractors.find_one({"slug": slug})
+        if not existing or (exclude_id and str(existing["_id"]) == exclude_id):
+            return slug
+        i += 1
+        slug = f"{base}-{i}"
+
+
 def token_expiry():
     return (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
 
 
-def upload_link(sub_id, gc_id, token):
-    return f"{FRONTEND_URL}/upload?sub_id={sub_id}&gc_id={gc_id}&token={token}"
+def upload_link(slug, sub_id, gc_id, token):
+    return f"{FRONTEND_URL}/u/{slug}?sub_id={sub_id}&gc_id={gc_id}&token={token}"
 
 
 # ---------- AUTH ROUTES ----------
@@ -190,13 +209,14 @@ async def register(body: RegisterReq, response: Response):
         raise HTTPException(400, "Email already registered")
     doc = {"company_name": body.company_name, "email": email, "phone": body.phone,
            "password_hash": hash_password(body.password), "stripe_customer_id": None,
-           "subscription_status": "trialing", "role": "contractor", "created_at": now_iso()}
+           "subscription_status": "trialing", "role": "contractor", "created_at": now_iso(),
+           "slug": await unique_slug(slugify(body.company_name)), "timezone": "UTC", "onboarded": False}
     res = await db.contractors.insert_one(doc)
     uid = str(res.inserted_id)
     token = create_access_token(uid, email)
     set_auth_cookie(response, token)
     return {"id": uid, "company_name": body.company_name, "email": email,
-            "subscription_status": "trialing", "token": token}
+            "subscription_status": "trialing", "onboarded": False, "token": token}
 
 
 @api.post("/auth/login")
@@ -234,7 +254,7 @@ async def invite_subcontractor(body: InviteReq, user: dict = Depends(get_current
     res = await db.subcontractors.insert_one(doc)
     sub_id = str(res.inserted_id)
     doc.pop("_id", None)
-    link = upload_link(sub_id, gc_id, token)
+    link = upload_link(user.get("slug", "portal"), sub_id, gc_id, token)
     html = f"""<table width="100%"><tr><td style="font-family:Arial;padding:24px">
     <h2>COI Upload Request from {user['company_name']}</h2>
     <p>Hi {body.contact_name}, please upload your current Certificate of Insurance (COI).</p>
@@ -492,10 +512,15 @@ async def run_weekly_reports():
 
 async def run_scheduled_reports():
     now = datetime.now(timezone.utc)
-    today = now.date().isoformat()
     sent = 0
     for gc in await db.contractors.find({}).to_list(1000):
-        if now.weekday() == gc.get("report_day", 0) and now.hour == gc.get("report_hour", 7) and gc.get("last_report_sent") != today:
+        try:
+            tz = ZoneInfo(gc.get("timezone") or "UTC")
+        except Exception:
+            tz = ZoneInfo("UTC")
+        local = now.astimezone(tz)
+        today = local.date().isoformat()
+        if local.weekday() == gc.get("report_day", 0) and local.hour == gc.get("report_hour", 7) and gc.get("last_report_sent") != today:
             await send_report_email(gc)
             await db.contractors.update_one({"_id": gc["_id"]}, {"$set": {"last_report_sent": today}})
             sent += 1
@@ -519,7 +544,9 @@ async def get_settings(user: dict = Depends(get_current_user)):
     return {"company_name": user["company_name"], "brand_color": user.get("brand_color", "#111111"),
             "logo_url": user.get("logo_url"), "escalation_threshold": user.get("escalation_threshold", 3),
             "report_recipients": user.get("report_recipients", []),
-            "report_day": user.get("report_day", 0), "report_hour": user.get("report_hour", 7)}
+            "report_day": user.get("report_day", 0), "report_hour": user.get("report_hour", 7),
+            "timezone": user.get("timezone", "UTC"), "slug": user.get("slug"),
+            "onboarded": user.get("onboarded", True)}
 
 
 @api.put("/settings")
@@ -535,9 +562,28 @@ async def update_settings(body: SettingsReq, user: dict = Depends(get_current_us
         upd["report_day"] = max(0, min(6, int(body.report_day)))
     if body.report_hour is not None:
         upd["report_hour"] = max(0, min(23, int(body.report_hour)))
+    if body.timezone is not None:
+        try:
+            ZoneInfo(body.timezone)
+            upd["timezone"] = body.timezone
+        except Exception:
+            raise HTTPException(400, "Invalid timezone")
+    if body.slug is not None:
+        upd["slug"] = await unique_slug(slugify(body.slug), user["id"])
+    if body.onboarded is not None:
+        upd["onboarded"] = bool(body.onboarded)
     if upd:
         await db.contractors.update_one({"_id": ObjectId(user["id"])}, {"$set": upd})
     return {"ok": True, **upd}
+
+
+@api.get("/public/slug/{slug}")
+async def public_by_slug(slug: str):
+    gc = await db.contractors.find_one({"slug": slug})
+    if not gc:
+        raise HTTPException(404, "Not found")
+    return {"id": str(gc["_id"]), "company_name": gc.get("company_name"),
+            "logo_url": gc.get("logo_url"), "brand_color": gc.get("brand_color", "#111111")}
 
 
 @api.get("/public/contractor/{gc_id}")
@@ -588,17 +634,17 @@ async def run_expiration_check():
             last = sub.get("last_nudged_at")
             if last and (datetime.now(timezone.utc) - datetime.fromisoformat(last)) < timedelta(days=3):
                 continue
+            gc = await db.contractors.find_one({"_id": ObjectId(sub["contractor_id"])}) if ObjectId.is_valid(sub.get("contractor_id", "")) else None
             n = sub.get("nudge_count", 0) + 1
             tok = new_upload_token()
             await db.subcontractors.update_one({"_id": sub["_id"]}, {"$set": {
                 "upload_token": tok, "upload_token_expires": token_expiry(), "upload_token_used": False,
                 "last_nudged_at": now_iso(), "nudge_count": n}})
-            link = upload_link(str(sub["_id"]), sub["contractor_id"], tok)
+            link = upload_link((gc or {}).get("slug", "portal"), str(sub["_id"]), sub["contractor_id"], tok)
             await send_email(sub["email"], f"Reminder #{n}: your COI is expiring — please renew",
                              f"<p>Hi {sub['contact_name']}, your COI expires on {exp}. <a href='{link}'>Upload updated paperwork here</a>.</p>")
             await send_sms(sub.get("phone", ""), f"Reminder #{n}: your COI expires {exp}. Upload updated paperwork: {link}")
             nudged += 1
-            gc = await db.contractors.find_one({"_id": ObjectId(sub["contractor_id"])}) if ObjectId.is_valid(sub.get("contractor_id", "")) else None
             threshold = (gc or {}).get("escalation_threshold", 3)
             if gc and n >= threshold and not sub.get("escalated"):
                 await send_email(gc["email"], f"Action needed: {sub['company_name']} is ignoring COI reminders",
@@ -842,6 +888,9 @@ async def seed():
                 "document_url": "", "created_at": now_iso()})
     if await db.prospects.count_documents({}) == 0:
         await run_prospecting()
+    for gc in await db.contractors.find({"slug": {"$exists": False}}).to_list(1000):
+        s = await unique_slug(slugify(gc.get("company_name", "gc")), str(gc["_id"]))
+        await db.contractors.update_one({"_id": gc["_id"]}, {"$set": {"slug": s, "timezone": gc.get("timezone", "UTC"), "onboarded": True}})
     # write test credentials
     try:
         Path("/app/memory/test_credentials.md").write_text(

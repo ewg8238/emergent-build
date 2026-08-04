@@ -3,11 +3,12 @@ import Nav from "@/components/Nav";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
-import { Palette, Upload, Users, ShieldAlert, Save, CalendarClock } from "lucide-react";
+import { Palette, Upload, Users, ShieldAlert, Save, CalendarClock, Link as LinkIcon } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const TIMEZONES = ["UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Phoenix", "America/Anchorage", "Pacific/Honolulu", "America/Toronto", "America/Mexico_City", "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney"];
 
 export default function Settings() {
   const { refresh } = useAuth();
@@ -33,6 +34,8 @@ export default function Settings() {
         report_recipients: list,
         report_day: settings.report_day,
         report_hour: settings.report_hour,
+        timezone: settings.timezone,
+        slug: settings.slug,
       });
       toast.success("Settings saved");
       load();
@@ -129,10 +132,28 @@ export default function Settings() {
               <Select value={String(settings.report_hour)} onValueChange={(v) => setSettings({ ...settings, report_hour: Number(v) })}>
                 <SelectTrigger className="w-[160px] rounded-sm" data-testid="report-hour-select"><SelectValue /></SelectTrigger>
                 <SelectContent className="max-h-64">
-                  {Array.from({ length: 24 }).map((_, h) => <SelectItem key={h} value={String(h)} data-testid={`hour-${h}`}>{String(h).padStart(2, "0")}:00 UTC</SelectItem>)}
+                  {Array.from({ length: 24 }).map((_, h) => <SelectItem key={h} value={String(h)} data-testid={`hour-${h}`}>{String(h).padStart(2, "0")}:00</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={settings.timezone} onValueChange={(v) => setSettings({ ...settings, timezone: v })}>
+                <SelectTrigger className="w-[220px] rounded-sm" data-testid="timezone-select"><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-64">
+                  {TIMEZONES.map((tz) => <SelectItem key={tz} value={tz} data-testid={`tz-${tz}`}>{tz.replace("_", " ")}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* Portal link */}
+          <div className="border border-neutral-200 bg-white p-6">
+            <div className="flex items-center gap-2 mb-4"><LinkIcon className="w-5 h-5" /><h2 className="font-head text-xl">Branded Upload Portal</h2></div>
+            <p className="text-sm text-neutral-600 mb-3">Your subcontractor upload links carry your company name. Customize the slug below.</p>
+            <div className="flex items-center border border-neutral-300 rounded-sm overflow-hidden">
+              <span className="px-3 py-3 bg-neutral-100 text-sm text-neutral-500 mono whitespace-nowrap">{BACKEND_URL}/u/</span>
+              <input value={settings.slug || ""} onChange={(e) => setSettings({ ...settings, slug: e.target.value })}
+                className="flex-1 px-3 py-3 outline-none mono text-sm" data-testid="slug-input" />
+            </div>
+            <p className="text-xs text-neutral-400 mt-2">Note: a full custom subdomain (e.g. skyline.coiautopilot.com) requires DNS setup at deploy time; this branded path works today.</p>
           </div>
 
           <button className="btn-primary flex items-center gap-2" onClick={save} disabled={saving} data-testid="save-settings-btn">

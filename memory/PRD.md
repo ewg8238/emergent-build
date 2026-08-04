@@ -57,3 +57,9 @@ End-to-end automated B2B micro-SaaS for General Contractors (GCs) to track, pars
 - **Per-GC report schedule**: `report_day` (0-6) + `report_hour` (0-23) on contractor; hourly `run_scheduled_reports` cron sends when day/hour match (dedupe via `last_report_sent`). Settings page has day + hour selects.
 - **Dashboard theming**: dashboard fetches `/settings`; brand color applied to top accent bar, company label, Total stat, and Invite button. Compliance status pills intentionally kept green/red/orange.
 - **Branded upload page**: public `GET /api/public/contractor/{gc_id}` returns company_name/logo_url/brand_color; `/upload` shows GC logo + name + brand-colored submit button.
+
+## Implemented (2026-08-04) — Iteration 6
+- **Timezone support**: `timezone` (IANA) on contractor; hourly `run_scheduled_reports` converts UTC to each GC's tz and sends at their local `report_day`/`report_hour`. Settings has timezone select. Uses stdlib `zoneinfo`.
+- **Branded portal slug**: `slug` on contractor (auto from company name, editable + de-duped/sanitized). Upload links now `/u/{slug}?...`; new route `/u/:slug` renders Upload; public `GET /api/public/slug/{slug}`. (True custom subdomain needs DNS at deploy; branded path works now.)
+- **Onboarding wizard** (`/onboarding`): 3-step post-signup flow (branding → first invite → done); register redirects here; `onboarded` flag on contractor (existing users backfilled True in seed).
+- Fixed a pre-existing corrupted/duplicated startup-shutdown block at end of server.py.
