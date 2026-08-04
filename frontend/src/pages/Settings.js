@@ -113,7 +113,7 @@ export default function Settings() {
           {/* Recipients */}
           <div className="border border-neutral-200 bg-white p-6">
             <div className="flex items-center gap-2 mb-4"><Users className="w-5 h-5" /><h2 className="font-head text-xl">Weekly Report Recipients</h2></div>
-            <p className="text-sm text-neutral-600 mb-3">Extra teammates who also get the Monday compliance email (comma-separated). You always receive it.</p>
+            <p className="text-sm text-neutral-600 mb-3">Extra teammates who also get the weekly compliance email (comma-separated). You always receive it.</p>
             <input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="ops@yourco.com, pm@yourco.com"
               className="w-full border border-neutral-300 px-4 py-3 rounded-sm focus:ring-2 focus:ring-black outline-none" data-testid="recipients-input" />
           </div>
