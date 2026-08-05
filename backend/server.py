@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 import os, logging, uuid, base64, json, asyncio, secrets, re
 from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
+from urllib.parse import urlparse
 from typing import List, Optional, Annotated, Any
 
 import bcrypt, jwt, httpx, stripe, fitz
@@ -45,6 +46,8 @@ TWILIO_FROM = os.environ.get("TWILIO_PHONE_NUMBER", "")
 APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY", "")
 INSTANTLY_API_KEY = os.environ.get("INSTANTLY_API_KEY", "")
 INSTANTLY_CAMPAIGN_ID = os.environ.get("INSTANTLY_CAMPAIGN_ID", "")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GOOGLE_CSE_ID = os.environ.get("GOOGLE_CSE_ID", "")
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
@@ -135,6 +138,15 @@ class SettingsReq(BaseModel):
     timezone: Optional[str] = None
     slug: Optional[str] = None
     onboarded: Optional[bool] = None
+
+
+class ForgotReq(BaseModel):
+    email: EmailStr
+
+
+class ResetReq(BaseModel):
+    token: str
+    password: str
 
 
 # ---------- Notifications (email via Resend, SMS simulated) ----------
@@ -241,6 +253,44 @@ async def logout(response: Response):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return user
+
+
+@api.post("/auth/forgot-password")
+async def forgot_password(body: ForgotReq):
+    email = body.email.lower()
+    user = await db.contractors.find_one({"email": email})
+    if user:
+        token = secrets.token_urlsafe(32)
+        await db.password_reset_tokens.insert_one({
+            "token": token, "user_id": str(user["_id"]),
+            "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
+            "used": False, "created_at": now_iso()})
+        link = f"{FRONTEND_URL}/reset-password?token={token}"
+        await send_email(email, "Reset your COI Autopilot password",
+            f"<div style='font-family:Arial'><h2>Password reset</h2>"
+            f"<p>We received a request to reset your password. This link expires in 1 hour.</p>"
+            f"<p><a href='{link}' style='background:#000;color:#fff;padding:10px 20px;text-decoration:none'>Reset password</a></p>"
+            f"<p>If you didn't request this, you can safely ignore this email.</p></div>")
+    return {"ok": True, "message": "If an account with that email exists, a reset link has been sent."}
+
+
+@api.post("/auth/reset-password")
+async def reset_password(body: ResetReq):
+    rec = await db.password_reset_tokens.find_one({"token": body.token})
+    if not rec or rec.get("used"):
+        raise HTTPException(400, "This reset link is invalid or has already been used.")
+    exp = rec["expires_at"]
+    if isinstance(exp, str):
+        exp = datetime.fromisoformat(exp)
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp < datetime.now(timezone.utc):
+        raise HTTPException(400, "This reset link has expired. Please request a new one.")
+    if len(body.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters.")
+    await db.contractors.update_one({"_id": ObjectId(rec["user_id"])}, {"$set": {"password_hash": hash_password(body.password)}})
+    await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
+    return {"ok": True}
 
 
 # ---------- WORKFLOW A: Invite Subcontractor ----------
@@ -865,6 +915,7 @@ scheduler = AsyncIOScheduler()
 
 async def seed():
     await db.contractors.create_index("email", unique=True)
+    await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin = await db.contractors.find_one({"email": admin_email})
     if not admin:
