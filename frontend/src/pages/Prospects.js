@@ -68,7 +68,7 @@ export default function Prospects() {
                       <div key={p.id} className="border border-neutral-200 p-3 card-hover" data-testid={`prospect-${p.id}`}>
                         <div className="font-medium text-sm">{p.company_name}</div>
                         <div className="text-xs text-neutral-500">{p.contact_name} • {p.title}</div>
-                        <div className="text-xs text-neutral-400 mono mt-1 flex items-center gap-1"><Mail className="w-3 h-3" />{p.email}</div>
+                        <div className="text-xs text-neutral-400 mono mt-1 flex items-center gap-1"><Mail className="w-3 h-3" />{p.email || p.website || "—"}</div>
                         {p.outreach_status !== "CONVERTED" && (
                           <button className="btn-outline !py-1 !px-3 !text-xs mt-3 flex items-center gap-1" onClick={() => advance(p)} data-testid={`advance-${p.id}`}>
                             <Clock className="w-3 h-3" /> Advance → {NEXT[p.outreach_status]}

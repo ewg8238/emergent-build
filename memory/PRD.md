@@ -63,3 +63,8 @@ End-to-end automated B2B micro-SaaS for General Contractors (GCs) to track, pars
 - **Branded portal slug**: `slug` on contractor (auto from company name, editable + de-duped/sanitized). Upload links now `/u/{slug}?...`; new route `/u/:slug` renders Upload; public `GET /api/public/slug/{slug}`. (True custom subdomain needs DNS at deploy; branded path works now.)
 - **Onboarding wizard** (`/onboarding`): 3-step post-signup flow (branding → first invite → done); register redirects here; `onboarded` flag on contractor (existing users backfilled True in seed).
 - Fixed a pre-existing corrupted/duplicated startup-shutdown block at end of server.py.
+
+## Implemented (2026-08-08) — Iteration 7
+- **Password reset**: `POST /api/auth/forgot-password` (no user enumeration) + `POST /api/auth/reset-password` (single-use, 1hr expiry token in `password_reset_tokens`, TTL index). Resend emails a link to `/reset-password?token=...`. Frontend: `ForgotPassword.js`, `ResetPassword.js`, "Forgot your password?" link on Login.
+- **Google Custom Search lead-gen**: `google_prospecting()` populates prospects with company_name + website (no email, `source:"google"`). `run_prospecting` now runs Apollo AND Google alongside, mock only if neither configured. Google leads not enrolled in Instantly (no email). `GOOGLE_API_KEY` set; `GOOGLE_CSE_ID` still blank (inert until provided). Prospects card shows website when email absent.
+- Stripe account claimed by user (still test mode until switched to live).

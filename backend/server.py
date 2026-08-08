@@ -776,24 +776,52 @@ async def apollo_instantly_prospecting():
     return {"added": added, "sequence_steps": len(SEQUENCE), "source": "apollo"}
 
 
+async def google_prospecting():
+    added = 0
+    query = os.environ.get("GOOGLE_SEARCH_QUERY") or "commercial general contractor construction company"
+    async with httpx.AsyncClient(timeout=40) as c:
+        r = await c.get("https://www.googleapis.com/customsearch/v1",
+                        params={"key": GOOGLE_API_KEY, "cx": GOOGLE_CSE_ID, "q": query, "num": 10})
+        r.raise_for_status()
+        for it in r.json().get("items", []):
+            website = it.get("link", "")
+            if not website:
+                continue
+            domain = urlparse(website).netloc.replace("www.", "")
+            name = (it.get("title") or domain).split("|")[0].split("-")[0].strip()[:80]
+            if await db.prospects.find_one({"$or": [{"website": website}, {"company_name": name}]}):
+                continue
+            await db.prospects.insert_one({"company_name": name, "contact_name": "", "email": "", "phone": "",
+                "title": "General Contractor", "website": website, "source": "google",
+                "outreach_status": "NEW", "sequence": SEQUENCE, "created_at": now_iso()})
+            added += 1
+    return {"added": added, "source": "google"}
+
+
 async def run_prospecting():
+    added, sources = 0, []
     if APOLLO_API_KEY:
         try:
-            return await apollo_instantly_prospecting()
+            r = await apollo_instantly_prospecting(); added += r["added"]; sources.append("apollo")
         except Exception as e:
-            logger.error(f"apollo/instantly fail, falling back to mock: {e}")
-    added, pushed = 0, []
-    for lead in MOCK_LEADS:
-        if await db.contractors.find_one({"email": lead["email"]}) or await db.prospects.find_one({"email": lead["email"]}):
-            continue
-        await db.prospects.insert_one({**lead, "outreach_status": "NEW", "sequence": SEQUENCE,
-                                       "created_at": now_iso()})
-        parts = lead["contact_name"].split(" ")
-        pushed.append({"email": lead["email"], "first_name": parts[0], "last_name": parts[-1],
-                       "company_name": lead["company_name"]})
-        added += 1
-    await instantly_add_leads(pushed)
-    return {"added": added, "sequence_steps": len(SEQUENCE), "source": "mock"}
+            logger.error(f"apollo fail: {e}")
+    if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+        try:
+            r = await google_prospecting(); added += r["added"]; sources.append("google")
+        except Exception as e:
+            logger.error(f"google fail: {e}")
+    if not sources:
+        pushed = []
+        for lead in MOCK_LEADS:
+            if await db.contractors.find_one({"email": lead["email"]}) or await db.prospects.find_one({"email": lead["email"]}):
+                continue
+            await db.prospects.insert_one({**lead, "outreach_status": "NEW", "sequence": SEQUENCE, "created_at": now_iso()})
+            parts = lead["contact_name"].split(" ")
+            pushed.append({"email": lead["email"], "first_name": parts[0], "last_name": parts[-1], "company_name": lead["company_name"]})
+            added += 1
+        await instantly_add_leads(pushed)
+        sources.append("mock")
+    return {"added": added, "sequence_steps": len(SEQUENCE), "source": "+".join(sources)}
 
 
 @api.post("/cron/prospecting")
