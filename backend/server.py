@@ -975,9 +975,19 @@ from fastapi.staticfiles import StaticFiles
 (ROOT_DIR / "uploads").mkdir(exist_ok=True)
 app.mount("/api/uploads", StaticFiles(directory=str(ROOT_DIR / "uploads")), name="uploads")
 
+origins = [
+    "https://emergent-build.onrender.com",
+    FRONTEND_URL,
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
+
+# Filter out empty or duplicate origins
+allowed_origins = list(set([o for o in origins if o]))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
