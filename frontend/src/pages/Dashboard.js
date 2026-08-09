@@ -5,7 +5,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Search, RefreshCw, Bell, CheckCircle2, AlertTriangle, XCircle, FileWarning, Eye, Download, Mail } from "lucide-react";
+import { Plus, Search, RefreshCw, Bell, CheckCircle2, AlertTriangle, XCircle, FileWarning, Eye, Download, Mail, Phone } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -20,6 +20,7 @@ export default function Dashboard() {
   const [status, setStatus] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [viewDoc, setViewDoc] = useState(null);
+  const [viewContact, setViewContact] = useState(null);
   const [brand, setBrand] = useState("#111111");
 
   const load = async () => {
@@ -149,7 +150,13 @@ export default function Dashboard() {
               ) : filtered.map((d) => (
                 <tr key={d.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition-colors" data-testid={`doc-row-${d.id}`}>
                   <td className="px-4 py-3">
-                    <div className="font-medium">{d.subcontractor_name}</div>
+                    <button
+                     onClick={() => setViewContact(d)}
+                     className="font-medium text-left hover:underline focus:outline-none"
+                     style={{ color: brand }}
+                  >
+                     {d.subcontractor_name}
+                    </button>
                     <div className="text-xs text-neutral-400">{d.contact_email}</div>
                   </td>
                   <td className="px-4 py-3 mono">{d.gl_policy_number || "—"}</td>
@@ -171,6 +178,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+     {/* Existing Document Viewer Dialog */}
       <Dialog open={!!viewDoc} onOpenChange={(o) => !o && setViewDoc(null)}>
         <DialogContent className="max-w-3xl" data-testid="coi-viewer">
           <DialogHeader><DialogTitle>{viewDoc?.subcontractor_name} — Certificate of Insurance</DialogTitle></DialogHeader>
@@ -183,6 +191,57 @@ export default function Dashboard() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* New Contact Info Dialog */}
+      <Dialog open={!!viewContact} onOpenChange={(o) => !o && setViewContact(null)}>
+        <DialogContent className="max-w-md bg-white border border-neutral-200 shadow-xl" data-testid="contact-viewer">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-head">{viewContact?.subcontractor_name}</DialogTitle>
+          </DialogHeader>
+          {viewContact && (
+            <div className="space-y-4 py-2 text-sm">
+              <div className="p-4 bg-neutral-50 rounded-md border border-neutral-100 space-y-3">
+                <div>
+                  <span className="text-xs font-semibold uppercase text-neutral-400 block mb-1">Contact Person</span>
+                  <p className="font-medium text-neutral-800">{viewContact.contact_name || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-xs font-semibold uppercase text-neutral-400 block mb-1">Email Address</span>
+                  <a 
+                    href={`mailto:${viewContact.contact_email}`} 
+                    className="font-medium text-blue-600 hover:underline flex items-center gap-2"
+                  >
+                    <Mail className="w-4 h-4" /> {viewContact.contact_email || "—"}
+                  </a>
+                </div>
+                <div>
+                  <span className="text-xs font-semibold uppercase text-neutral-400 block mb-1">Phone Number</span>
+                  {viewContact.phone ? (
+                    <a 
+                      href={`tel:${viewContact.phone}`} 
+                      className="font-medium text-blue-600 hover:underline flex items-center gap-2"
+                    >
+                      <Phone className="w-4 h-4" /> {viewContact.phone}
+                    </a>
+                  ) : (
+                    <p className="text-neutral-500">—</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button 
+                  className="btn-outline !py-2 !px-4 text-sm"
+                  onClick={() => setViewContact(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
