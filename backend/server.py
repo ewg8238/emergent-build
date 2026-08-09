@@ -989,12 +989,13 @@ scheduler = AsyncIOScheduler()
 async def seed():
     await db.contractors.create_index("email", unique=True)
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
-    admin_email = os.environ["ADMIN_EMAIL"].lower()
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com").lower()
+    admin_password = os.getenv("ADMIN_PASSWORD", "AdminPass123!")
     admin = await db.contractors.find_one({"email": admin_email})
     if not admin:
         res = await db.contractors.insert_one({
             "company_name": "Skyline General Contractors", "email": admin_email, "phone": "+13105550100",
-            "password_hash": hash_password(os.environ["ADMIN_PASSWORD"]), "stripe_customer_id": None,
+            "password_hash": hash_password(admin_password), "stripe_customer_id": None,
             "subscription_status": "active", "role": "contractor", "created_at": now_iso()})
         gc_id = str(res.inserted_id)
         demo_subs = [
@@ -1014,8 +1015,7 @@ async def seed():
         await run_prospecting()
     for gc in await db.contractors.find({"slug": {"$exists": False}}).to_list(1000):
         s = await unique_slug(slugify(gc.get("company_name", "gc")), str(gc["_id"]))
-        await db.contractors.update_one({"_id": gc["_id"]}, {"$set": {"slug": s, "timezone": gc.get("timezone", "UTC"), "onboarded": True}})
-    # write test credentials
+        await db.contractors.update_one({"_id": gc["_id"]}, {"$set": {"slug": s, "timezone": gc.get("timezone", "UTC"), "onboarded": True}})    # write test credentials
     try:
         Path("/app/memory/test_credentials.md").write_text(
             f"# Test Credentials\n\n## Contractor (admin/owner)\n- Email: {admin_email}\n- Password: {os.environ['ADMIN_PASSWORD']}\n- Login: POST /api/auth/login\n\nDashboard is at /dashboard after login.\n")
