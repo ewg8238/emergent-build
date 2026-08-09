@@ -86,3 +86,7 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
