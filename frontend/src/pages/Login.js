@@ -42,7 +42,7 @@ export default function Login() {
           {error && <p className="text-sm text-[var(--expired)]" data-testid="login-error">{error}</p>}
           <button className="btn-primary w-full" disabled={loading} data-testid="login-submit">{loading ? "Signing in…" : "Sign In"}</button>
         </form>
-        <p className="text-sm text-neutral-600 mt-6">No account? <Link to="/register" className="underline">Start a free trial</Link></p>
+        <p className="text-sm text-neutral-600 mt-6">No account? <Link to="/register" className="underline">Automate Today</Link></p>
         <p className="text-sm mt-2"><Link to="/forgot-password" className="underline" data-testid="forgot-password-link">Forgot your password?</Link></p>
       </div>
     </div>

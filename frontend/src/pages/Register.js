@@ -27,8 +27,8 @@ export default function Register() {
     <div className="min-h-screen flex items-center justify-center px-6 py-12">
       <div className="w-full max-w-md fade-up">
         <Link to="/" className="flex items-center gap-2 mb-8"><HardHat className="w-6 h-6" /><span className="font-head text-xl">COI Autopilot</span></Link>
-        <h1 className="font-head text-3xl mb-2">Start your free trial</h1>
-        <p className="text-neutral-600 mb-6 text-sm">14 days free. No card required to create your account.</p>
+        <h1 className="font-head text-3xl mb-2">Get Started with COI Autopilot</h1>
+        <p className="text-neutral-600 mb-6 text-sm">Automate your subcontractor compliance tracking today.</p>
         <form onSubmit={submit} className="space-y-4">
           {[["Company name", "company_name", "text"], ["Work email", "email", "email"], ["Phone", "phone", "tel"], ["Password", "password", "password"]].map(([label, key, type]) => (
             <div key={key}>

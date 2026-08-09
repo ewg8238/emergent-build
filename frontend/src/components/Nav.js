@@ -32,7 +32,7 @@ export default function Nav() {
           ) : (
             <>
               <Link to="/login" className="text-sm font-medium hover:opacity-60" data-testid="nav-login">Client Login</Link>
-              <Link to="/register" className="btn-primary !py-2 !px-4 text-sm" data-testid="nav-signup">Start Free Trial</Link>
+              <Link to="/register" className="btn-primary !py-2 !px-4 text-sm" data-testid="nav-signup">Automate Today</Link>
             </>
           )}
         </div>

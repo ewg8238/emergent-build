@@ -54,7 +54,7 @@ export default function Landing() {
           </p>
           <div className="flex flex-wrap gap-4 mt-10">
             <button className="btn-primary !bg-white !text-black !border-white flex items-center gap-2" onClick={scrollToPricing} data-testid="hero-trial-btn">
-              Start 14-Day Free Trial <ArrowRight className="w-4 h-4" />
+              Automate Today <ArrowRight className="w-4 h-4" />
             </button>
             <Link to="/login" className="btn-outline !text-white !border-white" data-testid="hero-login-btn">Client Login</Link>
           </div>
@@ -89,12 +89,12 @@ export default function Landing() {
               <span className="font-head text-6xl">$149</span><span className="text-neutral-500 mb-2">/ month</span>
             </div>
             <ul className="space-y-3 mb-8">
-              {["Unlimited subcontractors", "AI COI extraction", "Automated SMS + email drips", "Live compliance dashboard", "14-day free trial"].map((t) => (
+              {["Unlimited subcontractors", "AI COI extraction", "Automated SMS + email drips", "Live compliance dashboard"].map((t) => (
                 <li key={t} className="flex items-center gap-3 text-sm"><Check className="w-4 h-4 text-[var(--valid)]" /> {t}</li>
               ))}
             </ul>
             <button className="btn-primary w-full" onClick={startCheckout} disabled={loading} data-testid="subscribe-btn">
-              {loading ? "Redirecting…" : "Start 14-Day Free Trial"}
+              {loading ? "Redirecting…" : "Get Started"}
             </button>
           </div>
         </div>
