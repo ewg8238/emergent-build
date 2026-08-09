@@ -6,6 +6,9 @@ export default function Nav() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  // Check if current user is admin by role or email
+  const isAdmin = user?.role === "admin" || user?.email === process.env.REACT_APP_ADMIN_EMAIL;
+
   return (
     <nav className="glass sticky top-0 z-50 border-b border-neutral-200">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -17,7 +20,9 @@ export default function Nav() {
           {user ? (
             <>
               <Link to="/dashboard" className="text-sm font-medium hover:opacity-60" data-testid="nav-dashboard">Dashboard</Link>
-              <Link to="/prospects" className="text-sm font-medium hover:opacity-60" data-testid="nav-prospects">Prospects</Link>
+              {isAdmin && (
+                <Link to="/prospects" className="text-sm font-medium hover:opacity-60" data-testid="nav-prospects">Prospects</Link>
+              )}
               <Link to="/settings" className="text-sm font-medium hover:opacity-60" data-testid="nav-settings">Settings</Link>
               <button className="btn-outline !py-2 !px-4 flex items-center gap-2 text-sm"
                 onClick={async () => { await logout(); navigate("/"); }} data-testid="nav-logout">

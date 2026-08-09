@@ -115,13 +115,17 @@ export default function Dashboard() {
               placeholder="Search subcontractor or policy #" value={q} onChange={(e) => setQ(e.target.value)} data-testid="search-input" />
           </div>
           <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="w-[200px] rounded-sm" data-testid="status-filter"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {["ALL", "VALID", "EXPIRED", "NEEDS_REVIEW", "INSUFFICIENT"].map((s) => (
-                <SelectItem key={s} value={s} data-testid={`filter-${s}`}>{s === "ALL" ? "All statuses" : s}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <SelectTrigger className="w-[200px] rounded-sm bg-white" data-testid="status-filter">
+             <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-white text-neutral-900 border border-neutral-200 shadow-md z-50">
+             {["ALL", "VALID", "EXPIRED", "NEEDS_REVIEW", "INSUFFICIENT"].map((s) => (
+              <SelectItem key={s} value={s} data-testid={`filter-${s}`} className="focus:bg-neutral-100 cursor-pointer">
+               {s === "ALL" ? "All statuses" : s}
+             </SelectItem>
+           ))}
+         </SelectContent>
+        </Select>
           <button className="btn-outline !py-2.5 !px-4" onClick={load} data-testid="refresh-btn"><RefreshCw className="w-4 h-4" /></button>
           <button className="btn-outline !py-2.5 !px-4 text-sm flex items-center gap-2" onClick={() => exportReport("csv")} data-testid="export-csv-btn"><Download className="w-4 h-4" /> CSV</button>
           <button className="btn-outline !py-2.5 !px-4 text-sm flex items-center gap-2" onClick={() => exportReport("pdf")} data-testid="export-pdf-btn"><Download className="w-4 h-4" /> PDF</button>
